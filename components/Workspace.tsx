@@ -208,10 +208,38 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const [addedToNote,setAddedToNote]=useState(0);
  const latestInsert=inserts.at(-1);
  const [extras,setExtras]=useState<Record<string,(Selection & {fromAnswer?:boolean})[]>>({});
+ const [attachmentReads,setAttachmentReads]=useState<Record<string,number>>({});
  const citations=extras[active]||[];
  const [omitPrimary,setOmitPrimary]=useState<Record<string,boolean>>({});
  const [omitImage,setOmitImage]=useState<Record<string,boolean>>({});
  function addCitation(id:string,selection:Selection & {fromAnswer?:boolean}){setExtras(v=>({...v,[id]:[...(v[id]||[]),selection].slice(0,12)}));}
+ async function addImageAttachments(files:File[],pasted=false){
+   if(!files.length||sending.current.has(active))return;
+   const images=files.filter(file=>['image/png','image/jpeg','image/webp'].includes(file.type));
+   const supported=images.filter(file=>file.size>0&&file.size<=8*1024*1024);
+   const remaining=Math.max(0,12-citations.length-(attachmentReads[active]??0));
+   const accepted=supported.slice(0,remaining);
+   if(images.length!==files.length)setError('请添加 PNG、JPEG 或 WebP 图片。');
+   else if(supported.length!==images.length)setError('图片必须非空，且每张最多 8 MiB。');
+   else if(accepted.length<supported.length)setError('每次提问最多添加 12 个引用。');
+   if(!accepted.length)return;
+
+   setAttachmentReads(reads=>({...reads,[active]:(reads[active]??0)+accepted.length}));
+   try{
+     const result=await Promise.allSettled(accepted.map(file=>new Promise<Selection>((resolve,reject)=>{
+       const reader=new FileReader();
+       reader.onload=()=>resolve({page,image:String(reader.result),text:pasted?'粘贴的图片':file.name});
+       reader.onerror=reader.onabort=()=>reject(reader.error);
+       reader.readAsDataURL(file);
+     })));
+     for(const image of result){
+       if(image.status==='fulfilled')addCitation(active,image.value);
+     }
+     if(result.some(image=>image.status==='rejected'))setError('有图片读取失败，请重新添加。');
+   }finally{
+     setAttachmentReads(reads=>({...reads,[active]:(reads[active]??0)-accepted.length}));
+   }
+ }
  const [movingDoc,setMovingDoc]=useState<StudyDoc|null>(null);
  const moveDialog=useRef<HTMLDialogElement>(null);
  const [moveTarget,setMoveTarget]=useState('');
@@ -329,7 +357,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  function openThread(t:Discussion,sourcePage=t.page){setDocId(t.docId);requestReaderPage(sourcePage);setActive(t.id);setTab('discussions');setMobilePanel(true);}
  async function ensureSample(){if(savedDoc.current)return savedDoc.current;if(!samplePromise.current){samplePromise.current=(async()=>{const response=await fetch('/lesson.pdf');if(!response.ok)throw new Error('示例讲义未能载入，请上传自己的讲义。');const form=new FormData();form.append('file',new File([await response.blob()],sample.name,{type:'application/pdf'}));form.append('course',sample.course);const result=await request<{id:string}>('/docs',{method:'POST',body:form});savedDoc.current=result.id;setDocs(v=>[...v,{...sample,id:result.id}]);setThreads(v=>v.map(t=>t.docId==='sample'?{...t,docId:result.id}:t));setDocId(current=>current==='sample'?result.id:current);return result.id;})().catch(e=>{samplePromise.current=null;throw e;});}return samplePromise.current;}
  async function ask(value=question){
- if(!ready||!value.trim()||pending[thread.id]||sending.current.has(thread.id))return;
+ if(!ready||!value.trim()||pending[thread.id]||attachmentReads[thread.id]||sending.current.has(thread.id))return;
  const snapshot=thread, key=snapshot.id, q=value.trim();
  const signature=modelSignature;
  const previous=attempts.current.get(key);
@@ -490,17 +518,30 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const prompt=thread.messages.slice(0,i).findLast(item=>item.role==='user');
  appendNote(['## '+noteHeading+(prompt?.page?' · 第 '+prompt.page+' 页':''),noteSource(prompt?.page),
    ...(prompt?['### 问题',prompt.content]:[]),'### 回答',m.content]);
- }}><NotebookPen size={14}/>存入笔记</button>{!!m.memorySources?.length&&<div className="references"><span>参考的学习主题</span>{m.memorySources.map(source=><button type="button" key={source.topic} onClick={()=>openMemorySource(source)}>{source.topic} · 第 {source.page} 页</button>)}</div>}{m.processing&&<small className="processing-receipt" title={processingDetails(m.processing)}>{processingLabel(m.processing)}</small>}</>:<div>{m.content}</div>}</div>)}{currentPending&&<div className="thinking" role="status"><span/><span/><span/>正在沿着你的问题思考</div>}{receipts[active]&&<p className="question-receipt" role="status">{receipts[active]}</p>}{errors[active]&&<div className="thread-error" role="alert">{errors[active]} {failedAsk&&replayLabel}<button type="button" className="text-button" disabled={currentPending||!ready||(creditBlocked&&!failedAsk?.sent)} onClick={()=>void ask(attempts.current.get(active)?.question||question)}>重试原问题</button><button className="text-button" onClick={()=>setQuestion(thread.messages.filter(m=>m.role==='user').at(-1)?.content||'请解释选区内容。')}>重新编辑问题</button></div>}{!!thread.refs?.length&&<div className="references"><span>参考了你的课程记忆</span>{thread.refs.map(id=>{const ref=threads.find(t=>t.id===id);return ref?<button key={id} onClick={()=>openThread(ref)}><Icon name="chat" size={13}/>第 {ref.page} 页 · {selectionLabel(ref).slice(0,24)}<Icon name="chevron" size={12}/></button>:<span key={id}>历史讨论 {id.slice(0,8)}</span>;})}</div>}<div ref={bottom}/></div><div className="citation-tools">{quote&&<button type="button" className="citation-followup" disabled={currentPending||citations.length>=12} title="将所选回答作为下一问的上下文" onClick={addAnswerQuote}>引用到追问</button>}{(excerpts.length>0||hasAnswer)&&<div className="note-save-actions" role="group" aria-label="存入笔记">{excerpts.length>0&&<button type="button" onClick={saveExcerpts} title="保存所选讲义文字和原文页码">保存讲义摘录</button>}{hasAnswer&&<button type="button" onClick={saveDiscussion} title="保存当前讨论的所有问题与回答">保存整段对话</button>}</div>}<label className="attach-file" title="支持 PNG、JPEG、WebP 图片">添加文件<input type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={async e=>{const files=Array.from(e.target.files||[]);e.target.value='';for(const f of files.slice(0,12-citations.length)){if(f.size>8*1024*1024){setError('每张图片最多 8 MiB');continue}const r=new FileReader();r.onload=()=>addCitation(active,{page,image:String(r.result),text:f.name});r.readAsDataURL(f)}}}/></label>{((thread.text&&!omitPrimary[active]&&thread.text!=='按页提问')||primaryImage||citations.length>0)&&<div className="citation-list" aria-label="本次引用">
+ }}><NotebookPen size={14}/>存入笔记</button>{!!m.memorySources?.length&&<div className="references"><span>参考的学习主题</span>{m.memorySources.map(source=><button type="button" key={source.topic} onClick={()=>openMemorySource(source)}>{source.topic} · 第 {source.page} 页</button>)}</div>}{m.processing&&<small className="processing-receipt" title={processingDetails(m.processing)}>{processingLabel(m.processing)}</small>}</>:<div>{m.content}</div>}</div>)}{currentPending&&<div className="thinking" role="status"><span/><span/><span/>正在沿着你的问题思考</div>}{receipts[active]&&<p className="question-receipt" role="status">{receipts[active]}</p>}{errors[active]&&<div className="thread-error" role="alert">{errors[active]} {failedAsk&&replayLabel}<button type="button" className="text-button" disabled={currentPending||!ready||(creditBlocked&&!failedAsk?.sent)} onClick={()=>void ask(attempts.current.get(active)?.question||question)}>重试原问题</button><button className="text-button" onClick={()=>setQuestion(thread.messages.filter(m=>m.role==='user').at(-1)?.content||'请解释选区内容。')}>重新编辑问题</button></div>}{!!thread.refs?.length&&<div className="references"><span>参考了你的课程记忆</span>{thread.refs.map(id=>{const ref=threads.find(t=>t.id===id);return ref?<button key={id} onClick={()=>openThread(ref)}><Icon name="chat" size={13}/>第 {ref.page} 页 · {selectionLabel(ref).slice(0,24)}<Icon name="chevron" size={12}/></button>:<span key={id}>历史讨论 {id.slice(0,8)}</span>;})}</div>}<div ref={bottom}/></div><div className="citation-tools">{quote&&<button type="button" className="citation-followup" disabled={currentPending||citations.length>=12} title="将所选回答作为下一问的上下文" onClick={addAnswerQuote}>引用到追问</button>}{(excerpts.length>0||hasAnswer)&&<div className="note-save-actions" role="group" aria-label="存入笔记">{excerpts.length>0&&<button type="button" onClick={saveExcerpts} title="保存所选讲义文字和原文页码">保存讲义摘录</button>}{hasAnswer&&<button type="button" onClick={saveDiscussion} title="保存当前讨论的所有问题与回答">保存整段对话</button>}</div>}<label className="attach-file" title="支持 PNG、JPEG、WebP 图片，也可粘贴到提问框">添加文件<input type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={event=>{
+   const files=Array.from(event.currentTarget.files??[]);
+   event.currentTarget.value='';
+   void addImageAttachments(files);
+ }}/></label>{((thread.text&&!omitPrimary[active]&&thread.text!=='按页提问')||primaryImage||citations.length>0)&&<div className="citation-list" aria-label="本次引用">
  {thread.text&&!omitPrimary[active]&&thread.text!=='按页提问'&&<div className="citation-chip" title={thread.text}><button type="button" className="citation-locate" aria-label={`定位第 ${thread.page} 页：${thread.text}`} onClick={()=>{requestReaderPage(thread.page);setMobilePanel(false)}}><small>P{thread.page}</small><span>{thread.text}</span></button><button type="button" className="citation-remove" disabled={currentPending} aria-label={`移除引用：${thread.text}`} onClick={()=>setOmitPrimary(v=>({...v,[active]:true}))}>×</button></div>}
  {primaryImage&&<div className="citation-chip"><small>P{thread.page}</small><span>图片</span><button type="button" className="citation-remove" disabled={currentPending} onClick={removePrimaryImage} aria-label="移除引用：首次框选的图片">×</button></div>}
- {citations.map((c,i)=><div className="citation-chip" key={i} title={c.text||'图片'}><small>P{c.page}</small><span>{c.text||'图片'}</span><button type="button" className="citation-remove" disabled={currentPending} aria-label={`移除引用：${c.text||'图片'}`} onClick={()=>setExtras(v=>({...v,[active]:(v[active]||[]).filter((_,j)=>i!==j)}))}>×</button></div>)}</div>}</div>{latestInsert&&<div className="notebook-action-feedback"><span role="status">{addedToNote===latestInsert.id?'已加入学习笔记':'正在加入学习笔记…'}</span><button type="button" onClick={()=>{setInserts(previous=>previous.filter(item=>item.id>addedToNote));setTab('note')}} disabled={addedToNote!==latestInsert.id}>查看笔记</button></div>}<form className="composer" onSubmit={e=>{e.preventDefault();void ask();}}><div className="question-price" id="question-price" role="status">{priceLabel&&<span>{priceLabel}</span>}{!freeQuestion&&automaticMemory&&pricing&&<span>{automaticPriceLabel}</span>}<button type="button" className="question-account-link" onClick={()=>setAccount(true)}>积分账户</button>{!freeQuestion&&!!credits.error&&<button type="button" disabled={credits.loading} onClick={()=>void credits.refresh()}>重新读取</button>}{insufficientCredits&&<><strong>新提问的可用积分不足。保存学习笔记可获得积分，或改用 Magpie / 个人 API，站内扣分为 0.000。</strong><button type="button" onClick={()=>setTab('note')}>写笔记赚积分</button><button type="button" onClick={()=>document.querySelector<HTMLButtonElement>('.source-trigger')?.click()}>切换模型来源</button></>}{!freeQuestion&&credits.error?.includes('登录')&&<a href="/login">登录</a>}</div><label className="sr-only" htmlFor="question">向课件提问</label><textarea id="question" aria-describedby="question-price" onKeyDown={event=>{
+ {citations.map((c,i)=><div className="citation-chip" key={i} title={c.text||'图片'}><small>P{c.page}</small><span>{c.text||'图片'}</span><button type="button" className="citation-remove" disabled={currentPending} aria-label={`移除引用：${c.text||'图片'}`} onClick={()=>setExtras(v=>({...v,[active]:(v[active]||[]).filter((_,j)=>i!==j)}))}>×</button></div>)}</div>}</div>{latestInsert&&<div className="notebook-action-feedback"><span role="status">{addedToNote===latestInsert.id?'已加入学习笔记':'正在加入学习笔记…'}</span><button type="button" onClick={()=>{setInserts(previous=>previous.filter(item=>item.id>addedToNote));setTab('note')}} disabled={addedToNote!==latestInsert.id}>查看笔记</button></div>}<form className="composer" onSubmit={e=>{e.preventDefault();void ask();}}><div className="question-price" id="question-price" role="status">{priceLabel&&<span>{priceLabel}</span>}{!freeQuestion&&automaticMemory&&pricing&&<span>{automaticPriceLabel}</span>}<button type="button" className="question-account-link" onClick={()=>setAccount(true)}>积分账户</button>{!freeQuestion&&!!credits.error&&<button type="button" disabled={credits.loading} onClick={()=>void credits.refresh()}>重新读取</button>}{insufficientCredits&&<><strong>新提问的可用积分不足。保存学习笔记可获得积分，或改用 Magpie / 个人 API，站内扣分为 0.000。</strong><button type="button" onClick={()=>setTab('note')}>写笔记赚积分</button><button type="button" onClick={()=>document.querySelector<HTMLButtonElement>('.source-trigger')?.click()}>切换模型来源</button></>}{!freeQuestion&&credits.error?.includes('登录')&&<a href="/login">登录</a>}</div><label className="sr-only" htmlFor="question">向课件提问</label><textarea id="question" aria-describedby="question-price" onPaste={event=>{
+   const clipboard=event.clipboardData;
+   const files=Array.from(clipboard.files).filter(file=>file.type.startsWith('image/'));
+   const images=files.length?files:Array.from(clipboard.items)
+     .filter(item=>item.kind==='file'&&item.type.startsWith('image/'))
+     .flatMap(item=>{const file=item.getAsFile();return file?[file]:[];});
+   if(!images.length)return;
+   event.preventDefault();
+   void addImageAttachments(images,true);
+ }} onKeyDown={event=>{
    if(event.key!=='Enter'||event.shiftKey||event.altKey||event.ctrlKey||event.metaKey||
       event.nativeEvent.isComposing||event.nativeEvent.keyCode===229)return;
    event.preventDefault();
    const form=event.currentTarget.form;
    const send=form?.querySelector<HTMLButtonElement>('button[type="submit"]');
    if(send&&!send.disabled)form?.requestSubmit(send);
- }} value={question} onChange={e=>setQuestion(e.target.value)} placeholder={thread.messages.length?'继续追问，或换一种角度…':'输入问题，例如「第 3、5 页有什么联系？」或「梳理整份课件的大纲」'} rows={3}/><div className="composer-actions">{gateway?<MagpieModelPicker gateway={gateway} choose={model=>setConnection({...gateway,model})}/>:personal&&personalModel?<PersonalModelPicker profile={personal} model={personalModel} choose={model=>choosePersonal({model,revision:personal.revision})} image={!!primaryImage||citations.some(c=>!!c.image)}/>:<TutorControls value={settings} onChange={changeSettings} availability={availability}/>}<button title="发送问题" className="send-button" disabled={!question.trim()||currentPending||!ready||(creditBlocked&&!(replayQuestion&&failedAsk?.sent))} aria-describedby="question-price" aria-label="发送问题" type="submit"><Icon name="send" size={17}/></button></div></form></>}
+ }} value={question} onChange={e=>setQuestion(e.target.value)} placeholder={thread.messages.length?'继续追问，或换一种角度…':'输入问题，例如「第 3、5 页有什么联系？」或「梳理整份课件的大纲」'} rows={3}/><div className="composer-actions">{gateway?<MagpieModelPicker gateway={gateway} choose={model=>setConnection({...gateway,model})}/>:personal&&personalModel?<PersonalModelPicker profile={personal} model={personalModel} choose={model=>choosePersonal({model,revision:personal.revision})} image={!!primaryImage||citations.some(c=>!!c.image)}/>:<TutorControls value={settings} onChange={changeSettings} availability={availability}/>}<button title="发送问题" className="send-button" disabled={!question.trim()||currentPending||!!attachmentReads[active]||!ready||(creditBlocked&&!(replayQuestion&&failedAsk?.sent))} aria-describedby="question-price" aria-label="发送问题" type="submit"><Icon name="send" size={17}/></button></div></form></>}
  </aside></div>
  <dialog className="move-document-dialog" ref={moveDialog} aria-labelledby="move-document-title"
    onCancel={event=>{if(moving)event.preventDefault();}} onClose={()=>setMovingDoc(null)}>
