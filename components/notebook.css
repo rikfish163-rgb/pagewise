@@ -64,3 +64,111 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.nb-header {
+  min-height: 46px;
+}
+
+.nb-title strong {
+  font-weight: 650;
+}
+
+.nb-editor {
+  border-radius: 10px;
+  background: var(--paper);
+}
+
+.nb-modes {
+  height: 42px;
+  padding-inline: 8px;
+  gap: 4px;
+}
+
+.nb-modes button {
+  height: 30px;
+  border-radius: 5px;
+}
+
+.nb-modes button[aria-pressed="true"] {
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.nb-modes button[aria-pressed="true"]::after {
+  content: none;
+}
+
+.nb-typography summary {
+  padding: 7px 12px;
+  color: var(--muted);
+}
+
+.nb-format,
+.nb-layout {
+  padding: 5px 10px;
+  gap: 6px;
+}
+
+.nb textarea,
+.nb-flow {
+  background: var(--paper);
+  padding: clamp(16px, 5%, 32px);
+}
+
+.nb-flow {
+  max-width: 72ch;
+  margin-inline: auto;
+  color: var(--ink);
+}
+
+.nb-flow .markdown-answer h2 {
+  padding-top: .6em;
+  border-top: 1px solid var(--line);
+}
+
+.nb-flow .markdown-answer > h2:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.nb-flow .markdown-answer blockquote {
+  padding: .55em .85em;
+  border-inline-start-color: var(--accent);
+  background: var(--surface);
+}
+
+.citation-tools .citation-followup {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.note-save-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.citation-tools .note-save-actions button {
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.notebook-action-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin: 4px 12px 0;
+  padding: 5px 9px;
+  color: var(--muted);
+  background: var(--surface);
+  border-radius: 5px;
+  font-size: .8rem;
+}
+
+.notebook-action-feedback button {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
