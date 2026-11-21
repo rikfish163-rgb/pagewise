@@ -1,0 +1,41 @@
+.markdown-answer {
+  min-width: 0;
+  font: 17px/1.8 var(--font-serif);
+  color: var(--ink);
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.markdown-answer > :first-child { margin-top: 0; }
+.markdown-answer > :last-child { margin-bottom: 0; }
+.markdown-answer p { margin: 0 0 .9em; }
+.markdown-answer :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.5em 0 .65em;
+  font-weight: 650;
+  line-height: 1.5;
+  letter-spacing: 0;
+  color: inherit;
+}
+.markdown-answer h1 { font-size: 1.25em; }
+.markdown-answer h2 { font-size: 1.15em; }
+.markdown-answer :is(h3, h4, h5, h6) { font-size: 1.05em; }
+.markdown-answer strong { font-weight: 700; }
+.markdown-answer :is(ul, ol) { margin: .6em 0 1em; padding-left: 1.65em; }
+.markdown-answer ul { list-style: disc; }
+.markdown-answer ol { list-style: decimal; }
+.markdown-answer li { padding-left: .15em; margin: .25em 0; }
+.markdown-answer li > :is(ul, ol) { margin: .2em 0; }
+.markdown-answer li > p { margin: .25em 0; }
+.markdown-answer blockquote { margin: 1em 0; padding: .15em 0 .15em 1em; border-left: 2px solid var(--line); color: var(--muted); }
+.markdown-answer a { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 3px; }
+.markdown-answer a:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.markdown-answer code { font-family: var(--font-code); font-size: .88em; }
+.markdown-answer :not(pre) > code { padding: .13em .35em; border-radius: 3px; background: var(--wash); }
+.markdown-answer pre { max-width: 100%; overflow-x: auto; padding: 1em; margin: 1em 0; background: var(--wash); border-radius: 5px; line-height: 1.6; white-space: pre; overflow-wrap: normal; }
+.markdown-answer pre code { padding: 0; background: none; }
+.markdown-answer hr { margin: 1.5em 0; border: 0; border-top: 1px solid var(--line); }
+.markdown-answer table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 1em 0; }
+.markdown-answer :is(th, td) { padding: .45em .75em; border: 1px solid var(--line); text-align: left; }
+.markdown-answer .katex { font-size: 1.08em; }
+.markdown-answer .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: .35em 0; margin: 1em 0; }
+.markdown-answer .katex-error { white-space: pre-wrap; overflow-wrap: anywhere; }

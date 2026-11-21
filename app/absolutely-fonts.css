@@ -1,0 +1,16 @@
+@font-face{font-family:"Figtree";font-style:normal;font-weight:400;font-display:swap;src:url("/fonts/absolutely/Figtree-400.ttf") format("truetype")}
+@font-face{font-family:"Figtree";font-style:italic;font-weight:400;font-display:swap;src:url("/fonts/absolutely/Figtree-400-Italic.ttf") format("truetype")}
+@font-face{font-family:"Figtree";font-style:normal;font-weight:700;font-display:swap;src:url("/fonts/absolutely/Figtree-700.ttf") format("truetype")}
+@font-face{font-family:"Figtree";font-style:italic;font-weight:700;font-display:swap;src:url("/fonts/absolutely/Figtree-700-Italic.ttf") format("truetype")}
+@font-face{font-family:"Source Serif 4";font-style:normal;font-weight:400;font-display:swap;src:url("/fonts/absolutely/SourceSerif4-400.ttf") format("truetype")}
+@font-face{font-family:"Source Serif 4";font-style:normal;font-weight:700;font-display:swap;src:url("/fonts/absolutely/SourceSerif4-700.ttf") format("truetype")}
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:400;font-display:swap;src:url("/fonts/absolutely/JetBrainsMono-400.ttf") format("truetype")}
+@font-face{font-family:"JetBrains Mono";font-style:italic;font-weight:400;font-display:swap;src:url("/fonts/absolutely/JetBrainsMono-400-Italic.ttf") format("truetype")}
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:700;font-display:swap;src:url("/fonts/absolutely/JetBrainsMono-700.ttf") format("truetype")}
+@font-face{font-family:"JetBrains Mono";font-style:italic;font-weight:700;font-display:swap;src:url("/fonts/absolutely/JetBrainsMono-700-Italic.ttf") format("truetype")}
+/* Load the interface glyphs first; lecture text can use the full WenKai repertoire. */
+@font-face{font-family:"Pagewise WenKai";font-style:normal;font-weight:100 500;font-display:swap;src:url("/fonts/wenkai/ui-regular.woff2") format("woff2")}
+@font-face{font-family:"Pagewise WenKai";font-style:normal;font-weight:501 900;font-display:swap;src:url("/fonts/wenkai/ui-medium.woff2") format("woff2")}
+@font-face{font-family:"WenKai Common";font-style:normal;font-weight:100 500;font-display:swap;src:url("/fonts/wenkai/common-regular.woff2") format("woff2")}
+@font-face{font-family:"WenKai Common";font-style:normal;font-weight:501 900;font-display:swap;src:url("/fonts/wenkai/common-medium.woff2") format("woff2")}
+@font-face{font-family:"WenKai Extended";font-style:normal;font-weight:100 900;font-display:swap;src:url("/fonts/wenkai/extended-regular.woff2") format("woff2")}

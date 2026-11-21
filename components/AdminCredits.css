@@ -1,0 +1,275 @@
+.admin-credits {
+  width: min(100% - 2rem, 70rem);
+  margin-inline: auto;
+  padding-block: clamp(1.5rem, 5vw, 3.5rem);
+}
+
+.admin-credits-heading {
+  display: grid;
+  justify-items: start;
+  gap: .75rem;
+  margin-bottom: 1.5rem;
+}
+
+.admin-credits-heading a {
+  color: var(--accent-ink);
+}
+
+.admin-credits-heading a:hover {
+  text-decoration: underline;
+  text-underline-offset: .2em;
+}
+
+.admin-credits h1 {
+  font: 600 clamp(2rem, 4vw, 3rem)/1.2 var(--font-serif);
+}
+
+.admin-credits h2,
+.admin-credits-dialog h2 {
+  font: 600 1.2rem/1.35 var(--font-serif);
+}
+
+.admin-credits-layout {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+.admin-credits-panel {
+  min-width: 0;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: .5rem;
+}
+
+.admin-credits-section {
+  padding: 1rem clamp(.75rem, 2vw, 1.25rem);
+}
+
+.admin-credits-section + .admin-credits-section {
+  border-top: 1px solid var(--line);
+}
+
+.admin-credits-search,
+.admin-credits-reason {
+  display: grid;
+  gap: .4rem;
+}
+
+.admin-credits-search {
+  margin-top: .75rem;
+}
+
+.admin-credits-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  align-items: center;
+}
+
+.admin-credits-input,
+.admin-credits-button {
+  min-height: 2.5rem;
+  border: 1px solid var(--rail);
+  border-radius: .3rem;
+  padding: .38rem .65rem;
+}
+
+.admin-credits-input {
+  min-width: 0;
+  width: 100%;
+  background: var(--paper);
+}
+
+.admin-credits-search .admin-credits-input {
+  flex: 1 1 10rem;
+}
+
+textarea.admin-credits-input {
+  resize: vertical;
+}
+
+.admin-credits-button:hover:not(:disabled) {
+  background: var(--wash);
+}
+
+.admin-credits-button.is-primary {
+  border-color: var(--accent-ink);
+  background: var(--accent-ink);
+  color: var(--paper);
+}
+
+.admin-credits-button.is-primary:hover:not(:disabled) {
+  background: var(--error);
+  color: var(--paper);
+}
+
+.admin-credits-summary,
+.admin-credits-account {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: .65rem 1rem;
+}
+
+.admin-credits-account {
+  margin-top: .85rem;
+  border-block: 1px solid var(--line);
+  padding-block: .6rem;
+}
+
+.admin-credits-account dt,
+.admin-credits-summary dt,
+.admin-credits-muted {
+  color: var(--muted);
+}
+
+.admin-credits-amount {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.admin-credits-account .admin-credits-amount {
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.admin-credits-status,
+.admin-credits-form,
+.admin-credits-history {
+  margin-top: .75rem;
+}
+
+.admin-credits-form {
+  display: grid;
+  gap: .65rem;
+  justify-items: start;
+}
+
+.admin-credits-form label {
+  width: 100%;
+  display: grid;
+  gap: .25rem;
+}
+
+.admin-credits-form input {
+  max-width: 13rem;
+}
+
+.admin-credits-error {
+  color: var(--error);
+}
+
+.admin-credits-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(calc(100% - 2rem), 28rem);
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: .55rem;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 1.25rem;
+}
+
+.admin-credits-dialog:modal::backdrop {
+  background: #1d1b1670;
+}
+
+.admin-credits-dialog .admin-credits-summary,
+.admin-credits-dialog .admin-credits-actions {
+  margin-top: 1rem;
+}
+
+.admin-credits-dialog .admin-credits-actions {
+  justify-content: flex-end;
+}
+
+.admin-credits-reason {
+  margin-top: .75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 46rem) {
+  .admin-credits-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.admin-credits-users {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.admin-credits-users li + li {
+  border-top: 1px solid var(--line);
+}
+
+.admin-credits-user {
+  display: grid;
+  width: 100%;
+  min-height: 3.5rem;
+  gap: .1rem;
+  padding: .55rem clamp(.75rem, 2vw, 1.25rem);
+  justify-content: stretch;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.admin-credits-user:hover:not(:disabled) {
+  background: var(--wash);
+}
+
+.admin-credits-user[aria-pressed="true"] {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 var(--accent-ink);
+}
+
+.admin-credits-user:focus-visible {
+  outline-offset: -3px;
+}
+
+.admin-credits-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.admin-credits-identity {
+  overflow-wrap: anywhere;
+}
+
+.admin-credits-history {
+  list-style: none;
+  margin-bottom: 0;
+  padding: 0;
+}
+
+.admin-credits-history li + li {
+  border-top: 1px solid var(--line);
+  margin-top: .6rem;
+  padding-top: .6rem;
+}
+
+.admin-credits-entry {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: .15rem .5rem;
+}
+
+.admin-credits-entry-reason {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.admin-credits-dialog p {
+  overflow-wrap: anywhere;
+}

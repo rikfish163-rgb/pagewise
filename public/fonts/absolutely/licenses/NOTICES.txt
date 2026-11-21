@@ -1,0 +1,18 @@
+Figtree
+Copyright 2022 The Figtree Project Authors (https://github.com/erikdkennedy/figtree)
+
+SIL Open Font License 1.1
+https://openfontlicense.org
+Upstream: https://github.com/erikdkennedy/figtree
+JetBrains Mono
+Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+
+SIL Open Font License 1.1
+https://scripts.sil.org/OFL
+Distribution: Google Fonts official service
+Source Serif 4
+© 2014 - 2021 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name ‘Source’.
+
+SIL Open Font License 1.1
+http://scripts.sil.org/OFL
+Distribution: Google Fonts official service

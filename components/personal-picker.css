@@ -1,0 +1,4 @@
+.personal-picker{min-width:0;flex:1;font:14px/1.5 var(--font-sans)}
+.personal-picker label,.personal-picker small{display:block;color:var(--muted)}
+.personal-picker select{display:block;margin:.15rem 0 .3rem;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:.3rem;color:var(--ink);font:inherit}
+.personal-picker small{overflow-wrap:anywhere}

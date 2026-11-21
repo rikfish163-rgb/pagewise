@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1795233037487,
+      "tag": "0000_study",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1795250249272,
+      "tag": "0001_project_memory",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795256440048,
+      "tag": "0002_sharp_sunset_bain",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1795257411719,
+      "tag": "0003_spendable_credits",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795258207049,
+      "tag": "0004_fractional_credits",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1795260599114,
+      "tag": "0005_site_accounts_admin_credits",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795261826155,
+      "tag": "0006_study_projects",
+      "breakpoints": true
+    }
+  ]
+}
