@@ -183,20 +183,28 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
   },[onDismiss]);
 
   useEffect(()=>{
-    if(count<2||error)return;
-    function turnPage(event:KeyboardEvent){
-      if(event.key!=='ArrowLeft'&&event.key!=='ArrowRight')return;
+    if(!count||error)return;
+    function navigateByKeyboard(event:KeyboardEvent){
+      if(!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return;
       if(event.defaultPrevented||event.isComposing||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey)return;
       const target=event.target;
       if(target instanceof HTMLElement&&(target.isContentEditable||target.closest('input,textarea,select,[role="textbox"],[role="slider"],[role="menu"]')))return;
       if(document.querySelector('dialog[open], [aria-modal="true"]'))return;
+      if(event.key==='ArrowUp'||event.key==='ArrowDown'){
+        const reader=scroll.current;
+        if(!reader||(target!==document.body&&target!==document.documentElement))return;
+        event.preventDefault();
+        stopRestoring();
+        reader.scrollTop+=event.key==='ArrowDown'?48:-48;
+        return;
+      }
       const next=pageWithin(current+(event.key==='ArrowLeft'?-1:1),count);
       if(next===current)return;
       event.preventDefault();
       goToPage(next);
     }
-    document.addEventListener('keydown',turnPage);
-    return ()=>document.removeEventListener('keydown',turnPage);
+    document.addEventListener('keydown',navigateByKeyboard);
+    return ()=>document.removeEventListener('keydown',navigateByKeyboard);
   });
 
   useEffect(() => {
@@ -262,7 +270,7 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
       <button aria-label="放大" disabled={zoom>=2} onClick={()=>setZoom(z=>Math.min(2,z+.25))}><ZoomIn size={17}/></button></div>
     </div>
     {error && <div className="reader-error" role="alert">{error} <button onClick={()=>setRevision(r=>r+1)}>重新加载</button></div>}
-    <div className="reader-scroll" ref={scroll} onScroll={syncScroll} onWheel={stopRestoring} onTouchStart={stopRestoring} onPointerDown={stopRestoring}
+    <div className="reader-scroll" ref={scroll} tabIndex={0} role="region" aria-label="讲义页面" onScroll={syncScroll} onWheel={stopRestoring} onTouchStart={stopRestoring} onPointerDown={stopRestoring}
       onKeyDown={event=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key))stopRestoring();}}>
       {!count&&busy && <div role="status" className="reader-loading">正在解析文档…</div>}
       <div ref={stack} className="reader-page-stack">{Array.from({length:count},(_,i)=><ContinuousPage key={i+1} current={i+1} pdf={pdf} deck={deck}
