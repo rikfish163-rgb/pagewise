@@ -17,6 +17,8 @@ export type TutorProcessing = {
   model?: string;
   reasoningEffort?: ReasoningEffort;
   tps?: number;
+  answerTokens?: number;
+  durationMs?: number;
   timingSource?: 'provider'|'request';
 };
 export type TutorModel = {
