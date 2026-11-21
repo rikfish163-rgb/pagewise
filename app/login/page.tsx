@@ -9,7 +9,6 @@ import {
   Smartphone,
 } from "lucide-react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { chatGPTSignInPath } from "@/app/chatgpt-auth";
 import { externalLoginReady, getSiteAccount } from "@/app/site-account";
 import styles from "./login.module.css";
@@ -71,17 +70,17 @@ export default async function LoginPage({
   return (
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
-        <Link className={styles.brand} href="/" aria-label="页边首页" prefetch={false}>
+        <a className={styles.brand} href="/" aria-label="页边首页">
           <span className={styles.brandMark}><BookOpen size={20} aria-hidden="true" /></span>
           <span>页边</span>
-        </Link>
+        </a>
         <nav className={styles.nav} aria-label="页边导航">
-          <Link className={styles.navItem} href={readerPath} prefetch={false}>
+          <a className={styles.navItem} href={readerPath}>
             <BookOpen size={16} aria-hidden="true" /> 我的阅读器
-          </Link>
-          <Link className={styles.navItem} href={returnQuery ? `/login?${returnQuery}` : "/login"} aria-current="page" prefetch={false}>
+          </a>
+          <a className={styles.navItem} href={returnQuery ? `/login?${returnQuery}` : "/login"} aria-current="page">
             <CircleUserRound size={16} aria-hidden="true" /> {account ? "我的账号" : "登录"}
-          </Link>
+          </a>
         </nav>
       </aside>
 
@@ -102,9 +101,9 @@ export default async function LoginPage({
                     {account.email && account.email !== account.displayName && <p>{account.email}</p>}
                   </div>
                 </div>
-                <Link className={styles.primary} href={readerPath} prefetch={false}>
+                <a className={styles.primary} href={readerPath}>
                   继续阅读 <ArrowRight size={16} aria-hidden="true" />
-                </Link>
+                </a>
               </section>
               {account.source === "chatgpt" && (
                 <section className={styles.secondary} aria-labelledby="link-login-title">
