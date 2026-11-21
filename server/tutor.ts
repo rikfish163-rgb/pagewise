@@ -53,6 +53,7 @@ export async function answerSelectionWithMetadata(q: TutorInput, send: typeof fe
   ];
   if(!task&&q.image) parts.push({type:"input_image",image_url:q.image,detail:"high"});
   let res: Response;
+  const startedAt=Date.now();
   try {
     res=await send("https://api.openai.com/v1/responses",{
       method:"POST", redirect:"manual", headers:{"Content-Type":"application/json",Authorization:"Bearer "+key},
@@ -81,5 +82,18 @@ export async function answerSelectionWithMetadata(q: TutorInput, send: typeof fe
     .filter(text => typeof text === 'string' && text.length > 0)
     .join('\n').trim();
   if(!answer) throw new ModelResponseError("未收到可显示的讲解，请重试。",metadata);
-  return {...metadata,answer,processing:processingResult(speed??'auto',data.service_tier)};
+  const providerMs=Number(res.headers.get('openai-processing-ms'));
+  const providerTiming=Number.isFinite(providerMs)&&providerMs>0;
+  const duration=providerTiming?providerMs:Date.now()-startedAt;
+  const outputTokens=metadata.usage?.outputTokens;
+  const reasoningTokens=metadata.usage?.reasoningTokens??(reasoningEffort==='none'?0:undefined);
+  const answerTokens=outputTokens!==undefined&&reasoningTokens!==undefined?outputTokens-reasoningTokens:undefined;
+  const tps=answerTokens!==undefined&&answerTokens>0&&duration>0?answerTokens*1000/duration:undefined;
+  return {...metadata,answer,processing:{
+    ...processingResult(speed??'auto',data.service_tier),
+    model:metadata.model??model,reasoningEffort,
+    ...(tps!==undefined&&Number.isFinite(tps)?{
+      tps,timingSource:providerTiming?'provider':'request',answerTokens,durationMs:duration
+    }:{})
+  }};
 }

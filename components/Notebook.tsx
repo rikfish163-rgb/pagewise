@@ -1,5 +1,5 @@
 'use client';
-import {useEffect,useMemo,useRef,useState,type CSSProperties} from 'react';
+import {useEffect,useMemo,useRef,useState,type CSSProperties,type KeyboardEvent as ReactKeyboardEvent} from 'react';
 import { Bold, Check, ChevronDown, ChevronLeft, ChevronRight, Ellipsis, Eye, FileText, Highlighter, List, Maximize2, PencilLine, Sigma, SpellCheck, SplitSquareVertical } from 'lucide-react';
 import {DropdownMenu} from 'radix-ui';
 import {notebookNavigation} from '../lib/markdown';
@@ -15,9 +15,22 @@ const fontFamilies: Record<string,string> = {
 const preferencesKey='pagewise:note-typography:v1';
 type Layout='continuous'|'standard'|'wide';
 type Preferences={font:string;size:number;layout:Layout;spacing?:string};
-const defaults:Preferences={font:'系统黑体',size:12,layout:'standard'};
+const defaults:Preferences={font:'系统黑体',size:12,layout:'continuous'};
 
-export default function Notebook({visible,insert}:{visible:boolean;insert:{text:string;id:number}|null}){
+function scrollPreview(event:ReactKeyboardEvent<HTMLDivElement>){
+ if(event.key!=='ArrowDown'&&event.key!=='ArrowUp')return;
+ if(event.defaultPrevented||event.nativeEvent.isComposing||event.altKey||event.ctrlKey||
+    event.metaKey||event.shiftKey||event.target!==event.currentTarget)return;
+ const preview=event.currentTarget;
+ const slide=preview.querySelector<HTMLElement>('.nb-slide');
+ const down=event.key==='ArrowDown';
+ const canScrollSlide=slide&&(down?slide.scrollHeight-slide.clientHeight-slide.scrollTop>1:slide.scrollTop>0);
+ const surface=canScrollSlide?slide:preview;
+ event.preventDefault();
+ surface.scrollTop+=down?48:-48;
+}
+
+export default function Notebook({visible,inserts,onAppend}:{visible:boolean;inserts:{text:string;id:number}[];onAppend:(id:number)=>void}){
  const [body,setBody]=useState(''),[revision,setRevision]=useState(-1),[preview,setPreview]=useState(false),[status,setStatus]=useState('正在读取…');
  const area=useRef<HTMLTextAreaElement>(null),last=useRef(''),saving=useRef(false),inserted=useRef(0),[attempt,retry]=useState(0),[blocked,setBlocked]=useState(false);
  const [prefs,setPrefs]=useState(defaults);
@@ -26,7 +39,11 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
  const actions=useRef<HTMLDivElement>(null),importFile=useRef<HTMLInputElement>(null),stage=useRef<HTMLDialogElement>(null);
  const [expanded,setExpanded]=useState(false);
  const {pages,headings}=useMemo(()=>preview?notebookNavigation(body):{pages:[],headings:[]},[body,preview]);
- const editor=useRef<HTMLDivElement>(null),previewHost=useRef<HTMLDivElement>(null);
+ const editor=useRef<HTMLDivElement>(null),previewHost=useRef<HTMLDivElement>(null),expandedPreviewHost=useRef<HTMLDivElement>(null);
+ const outlineTarget=useRef<number|null>(null);
+ useEffect(()=>{
+   if(expanded)expandedPreviewHost.current?.focus({preventScroll:true});
+ },[expanded]);
  const index=Math.min(page,Math.max(0,pages.length-1));
  useEffect(()=>{
    try{
@@ -46,7 +63,15 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
    return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape)};
  },[menu]);
  useEffect(()=>{let live=true;fetch('/api/study/notebook').then(async r=>{const data=await r.json() as {body:string;revision:number;error?:string};if(!r.ok)throw Error(data.error);if(live){setBody(data.body);last.current=data.body;setRevision(data.revision);setStatus('已同步');}}).catch(e=>{if(live)setStatus(e.message)});return()=>{live=false}},[]);
- useEffect(()=>{if(insert&&inserted.current!==insert.id&&revision>=0){inserted.current=insert.id;setBody(v=>[v.trimEnd(),insert.text].filter(Boolean).join('\n\n'));setPreview(false);}},[insert,revision]);
+ useEffect(()=>{
+   if(revision<0)return;
+   const pending=inserts.filter(item=>item.id>inserted.current);
+   const latest=pending.at(-1);
+   if(!latest)return;
+   inserted.current=latest.id;
+   setBody(value=>[value.trimEnd(),...pending.map(item=>item.text)].filter(Boolean).join('\n\n'));
+   onAppend(latest.id);
+ },[inserts,revision,onAppend]);
  useEffect(()=>{if(revision<0||blocked||last.current===body)return;
   setStatus('待保存');const warn=(e:BeforeUnloadEvent)=>e.preventDefault();window.addEventListener('beforeunload',warn);
   const timer=setTimeout(async()=>{if(saving.current)return;saving.current=true;setStatus('保存中…');try{const r=await fetch('/api/study/notebook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body,revision})});const data=await r.json() as {body:string;revision:number;error?:string};if(!r.ok){if(r.status===409)setBlocked(true);throw Error(data.error||'保存失败');}last.current=body;setStatus('已同步');setRevision(data.revision);window.dispatchEvent(new Event('pagewise:credits-changed'));}catch(e){setStatus(e instanceof Error?e.message:'保存失败');}finally{saving.current=false;}},500);
@@ -76,7 +101,20 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
      </DropdownMenu.Trigger>
      <DropdownMenu.Portal container={inDialog?stage.current:undefined}>
        <DropdownMenu.Content className="nb-outline-menu" align="end" sideOffset={4} collisionPadding={6}
-         collisionBoundary={inDialog?stage.current:editor.current}>
+         collisionBoundary={inDialog?stage.current:editor.current}
+         onCloseAutoFocus={event=>{
+           const headingIndex=outlineTarget.current;
+           outlineTarget.current=null;
+           const host=(inDialog?expandedPreviewHost:previewHost).current;
+           if(headingIndex===null||!host)return;
+           const position=slide?headings[headingIndex]?.position:headingIndex;
+           event.preventDefault();
+           host.focus({preventScroll:true});
+           if(position!==undefined){
+             const headingsInPreview=host.querySelectorAll<HTMLElement>('.markdown-answer :is(h1,h2,h3,h4,h5,h6)');
+             headingsInPreview[position]?.scrollIntoView({block:'nearest'});
+           }
+         }}>
          {headings.map((heading,headingIndex)=><DropdownMenu.Item
            key={headingIndex}
            className="nb-outline-item"
@@ -84,12 +122,8 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
            title={heading.text}
            style={{'--heading-indent':Math.min(heading.level-1,3)*10+'px'} as CSSProperties}
            onSelect={()=>{
+             outlineTarget.current=headingIndex;
              if(slide)setPage(heading.slide);
-             requestAnimationFrame(()=>{
-               const host=inDialog?stage.current:previewHost.current;
-               const target=host?.querySelectorAll<HTMLElement>('.markdown-answer :is(h1,h2,h3,h4,h5,h6)')[slide?heading.position:headingIndex];
-               target?.scrollIntoView({block:'nearest'});
-             });
            }}>
            <span>{heading.text}</span>
          </DropdownMenu.Item>)}
@@ -104,7 +138,7 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
    return <button type="button" title={label} aria-label={label} onMouseDown={e=>e.preventDefault()} onClick={act}><Icon size={15} strokeWidth={1.7}/></button>;
  }
  return <section className="nb" hidden={!visible} style={style} aria-label="我的学习笔记">
-   <header className="nb-header"><div className="nb-title"><FileText size={18} aria-hidden="true"/><strong>学习笔记<span>.md</span></strong></div>
+   <header className="nb-header"><div className="nb-title"><FileText size={17} aria-hidden="true"/><strong>学习笔记</strong></div>
      <div className="nb-actions" ref={actions}><button className="nb-more" title="文件操作" aria-label="文件操作" aria-expanded={menu} onClick={()=>setMenu(!menu)}><Ellipsis size={18}/></button>
        {menu&&<div className="nb-menu"><button disabled={revision<0} onClick={()=>{setMenu(false);importFile.current?.click()}}>导入 Markdown</button><button onClick={()=>{setMenu(false);download()}}>导出 Markdown</button><button disabled={blocked||revision<0} onClick={()=>{setMenu(false);retry(n=>n+1)}}>保存笔记</button></div>}
        <input hidden ref={importFile} type="file" accept=".md,.markdown,text/markdown" onChange={async e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;if(f.size>750000){setStatus('文件过大');return}try{const imported=await f.text();setBody(v=>[v,imported].filter(Boolean).join('\n\n'));setPreview(false)}catch{setStatus('文件读取失败')}}}/>
@@ -113,10 +147,13 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
    <div className="nb-editor" ref={editor}>
      <div className="nb-modes" role="group" aria-label="笔记视图">
        <button aria-pressed={!preview} onClick={()=>setPreview(false)}><PencilLine size={15}/>编辑</button>
-       <button aria-pressed={preview} onClick={()=>setPreview(true)}><Eye size={16}/>预览</button>
+       <button aria-pressed={preview} onClick={()=>{
+         setPreview(true);
+         requestAnimationFrame(()=>previewHost.current?.focus({preventScroll:true}));
+       }}><Eye size={16}/>预览</button>
        {preview&&<button className="nb-expand" aria-label="放大预览" title="放大预览" onClick={()=>{setExpanded(true);stage.current?.showModal()}}><Maximize2 size={15}/></button>}
      </div>
-     <details className="nb-typography"><summary>排版<span>{prefs.font||'自定义字体'} · {prefs.size} pt · {prefs.spacing==='compact'?'紧凑':'宽松'}</span></summary><div className="nb-typebar">
+     <details className="nb-typography"><summary>排版设置</summary><div className="nb-typebar">
        <label>字体<select aria-label="笔记字体" value={Object.hasOwn(fontFamilies,prefs.font)?prefs.font:'custom'} onChange={e=>preference({font:e.target.value==='custom'?'':e.target.value})}>{Object.keys(fontFamilies).map(f=><option key={f}>{f}</option>)}<option value="custom">自定义字体</option></select></label>
        <label>字号<span className="nb-number"><input aria-label="笔记字号" type="number" min={8} max={72} key={prefs.size} defaultValue={prefs.size} onBlur={e=>{const n=e.target.valueAsNumber;if(Number.isFinite(n))preference({size:Math.min(72,Math.max(8,Math.round(n)))});e.target.value=String(Number.isFinite(n)?Math.min(72,Math.max(8,Math.round(n))):prefs.size)}} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur()}}/><span>pt</span></span></label>
        <label>行距<select aria-label="笔记行距" value={prefs.spacing??'normal'} onChange={e=>preference({spacing:e.target.value})}><option value="normal">宽松</option><option value="compact">紧凑</option></select></label>
@@ -126,10 +163,12 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
        <select aria-label="插入标题" value="" onChange={e=>wrap('#'.repeat(Number(e.target.value))+' ','',true)}><option value="" disabled>标题</option>{[1,2,3,4,5,6].map(n=><option value={n} key={n}>H{n}</option>)}</select>
        {tool('加粗',Bold,()=>wrap('**','**'))}{tool('高亮',Highlighter,()=>wrap('==','=='))}{tool('公式',Sigma,()=>wrap('$','$'))}{tool('列表',List,()=>wrap('- ','',true))}{tool('插入幻灯片分页线',SplitSquareVertical,()=>wrap('\n\n---\n\n',''))}{tool('规范排版',SpellCheck,normalize)}
      </fieldset>}
-     {preview?<div ref={previewHost} className={'nb-preview'+(slide?' paper-stage':'')}>{previewContent()}</div>:
+     {preview?<div ref={previewHost} className={'nb-preview'+(slide?' paper-stage':'')} tabIndex={0}
+       role="region" aria-label="笔记预览" onKeyDown={scrollPreview}>{previewContent()}</div>:
        <textarea ref={area} disabled={revision<0} aria-label="Markdown 学习笔记" value={body} onChange={e=>setBody(e.target.value)} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='b'){e.preventDefault();wrap('**','**')}}} placeholder="写下你的笔记…"/>}
    </div>
    <footer className="nb-status"><span role="status">{status==='已同步'&&<Check size={13}/>} {status}</span><span>{body.length.toLocaleString()} 字符</span></footer>
-   <dialog ref={stage} className="nb-dialog" onClose={()=>setExpanded(false)}><header><strong>学习笔记</strong>{expanded&&outline(true)}{slide&&navigation()}<button aria-label="关闭放大预览" onClick={()=>stage.current?.close()}>关闭</button></header>{expanded&&<div className={'nb-preview'+(slide?' paper-stage':'')}>{previewContent()}</div>}</dialog>
+   <dialog ref={stage} className="nb-dialog" onClose={()=>setExpanded(false)}><header><strong>学习笔记</strong>{expanded&&outline(true)}{slide&&navigation()}<button aria-label="关闭放大预览" onClick={()=>stage.current?.close()}>关闭</button></header>{expanded&&<div ref={expandedPreviewHost} className={'nb-preview'+(slide?' paper-stage':'')}
+     tabIndex={0} role="region" aria-label="放大的笔记预览" onKeyDown={scrollPreview}>{previewContent()}</div>}</dialog>
  </section>
 }

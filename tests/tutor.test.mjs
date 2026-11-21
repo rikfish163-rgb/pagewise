@@ -69,3 +69,21 @@ test('actual tier handles legacy priority alias, downgrades and missing metadata
  }
  await assert.rejects(answerSelectionWithMetadata({...base,model:'gpt-5.4-nano',speed:'fast'},()=>assert.fail('no network')),/速度/);
 });
+test('answer TPS deducts reasoning tokens and requires usable metering',async()=>{
+ const input={key:'fixture',question:'测试',history:[],memories:[],reasoningEffort:'low'};
+ const response={status:'completed',output:[{type:'message',content:[{type:'output_text',text:'答案'}]}]};
+ async function measure(reasoning){
+   const details=reasoning===undefined?{}:{reasoning_tokens:reasoning};
+   return (await answerSelectionWithMetadata(input,async()=>Response.json({
+     ...response,usage:{output_tokens:100,output_tokens_details:details}
+   },{headers:{'openai-processing-ms':'2000'}}))).processing;
+ }
+ const result=await measure(60);
+ assert.equal(result.tps,20);
+ assert.equal(result.answerTokens,40);
+ assert.equal(result.durationMs,2000);
+ assert.equal(result.timingSource,'provider');
+ assert.equal((await measure(undefined)).tps,undefined);
+ assert.equal((await measure(100)).tps,undefined);
+ assert.equal((await measure(101)).tps,undefined);
+});
