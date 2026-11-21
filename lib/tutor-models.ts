@@ -4,6 +4,7 @@
 // https://developers.openai.com/api/docs/guides/reasoning#reasoning-effort
 export const REASONING_EFFORTS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ReasoningEffort = typeof REASONING_EFFORTS[number];
+export const REASONING_LABELS:Record<ReasoningEffort,string>={none:'无',low:'低',medium:'中',high:'高',xhigh:'极高',max:'最高'};
 const fifthGeneration = ['none', 'low', 'medium', 'high', 'xhigh'] as const;
 const reasoningOnly = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export const TUTOR_SPEEDS = ['auto','standard','fast','ultrafast'] as const;
@@ -13,6 +14,10 @@ export type TutorProcessing = {
   serviceTier: 'default'|'fast'|'priority'|'ultrafast'|'flex'|'scale'|null;
   fallback: boolean|null;
   message: string;
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
+  tps?: number;
+  timingSource?: 'provider'|'request';
 };
 export type TutorModel = {
   id: string;
