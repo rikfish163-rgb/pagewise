@@ -29,6 +29,7 @@ const title = (doc: StudyDoc) => doc.name.replace(/\.(pdf|pptx)$/i, '');
 export default function StudyHome({ docs, savedProjects = [], onCreateProject, onManageProject, onMoveDoc, threads = [], onOpenDoc, onImport, onSample, onOpenMemory, loading = false, error }: StudyHomeProps) {
   const [query, setQuery] = useState('');
   const [project, setProject] = useState<string | null>(null);
+  const [mobileProjects, setMobileProjects] = useState(false);
   const [sort, setSort] = useState<'recent' | 'name'>('recent');
   const searchId = useId();
   const [name,setName]=useState('');
@@ -102,6 +103,7 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
   const recentPage=recent?checkpoints.get(recent.id):null;
   const visible = ordered.filter(doc => (activeProject === null || doc.course === activeProject) && (!search ||
     `${doc.name} ${doc.course}`.toLocaleLowerCase().includes(search) || threads.some(thread => thread.docId === doc.id && thread.messages.some(message => message.role === 'user' && message.content.toLocaleLowerCase().includes(search)))));
+  const matchingProjects=activeProject===null?projects.filter(name=>name.toLocaleLowerCase().includes(search)):[];
   const recentDocs=visible.filter(doc=>!!doc.visited).slice(0,5);
   const sortedVisible = sort === 'name'
     ? [...visible].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }) || a.id.localeCompare(b.id))
@@ -109,16 +111,18 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
   const openDocument = (doc: StudyDoc) => onOpenDoc(doc);
 
   return <section className="study-home" aria-label="学习项目首页" aria-busy={loading}>
-    <aside className="sh-sidebar" aria-label="项目导航">
+    {mobileProjects&&<button type="button" className="sh-project-backdrop" aria-label="关闭项目目录" onClick={()=>setMobileProjects(false)}/>}
+    <aside className={`sh-sidebar${mobileProjects?' is-open':''}`} aria-label="项目导航">
       <div className="sh-space"><span className="sh-space-icon"><BookOpen size={20} /></span><div><strong>我的学习空间</strong></div></div>
-      <button type="button" className="sh-nav-item" aria-current={activeProject === null ? 'page' : undefined} onClick={() => setProject(null)}><FolderOpen size={18} /><span>全部项目</span><small>{projects.length}</small></button>
+      <div className="sh-project-drawer-heading"><strong>我的项目</strong><button type="button" aria-label="关闭项目目录" onClick={()=>setMobileProjects(false)}><X size={18}/></button></div>
+      <button type="button" className="sh-nav-item" aria-current={activeProject === null ? 'page' : undefined} onClick={() => {setProject(null);setMobileProjects(false)}}><FolderOpen size={18} /><span>全部项目</span><small>{projects.length}</small></button>
       <div className="sh-project-heading">
         <span>我的项目</span>
         <button type="button" className="sh-create" onClick={()=>{setName('');setCreateError('');createDialog.current?.showModal();}}><Plus size={15} aria-hidden="true"/>新建项目</button>
       </div>
       <nav aria-label="选择学习项目">
         {projects.map((name,index)=><div className="sh-project-row" key={name}>
-          <button type="button" className="sh-nav-item" aria-current={activeProject===name?'page':undefined} onClick={()=>setProject(name)}>
+          <button type="button" className="sh-nav-item" aria-current={activeProject===name?'page':undefined} onClick={()=>{setProject(name);setMobileProjects(false)}}>
             <span className="sh-project-dot" data-tone={index%4}/><span>{name||'未分类项目'}</span><small>{docs.filter(doc=>doc.course===name).length}</small>
           </button>
           {name&&<details className="sh-project-menu" name="study-project-actions">
@@ -172,14 +176,15 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
       </form>}
     </dialog>
     <div className="sh-main">
-      <header className="sh-header"><h1>{activeProject ?? '学习首页'}</h1><button type="button" className="sh-primary" onClick={() => onImport(activeProject ?? undefined)}><Plus size={17} />导入资料</button></header>
+      <header className="sh-header"><h1>{activeProject ?? '学习首页'}</h1><div className="sh-header-actions"><button type="button" className="sh-project-switch" aria-expanded={mobileProjects} onClick={()=>setMobileProjects(true)}><FolderOpen size={16}/>{activeProject??'全部项目'}</button><button type="button" className="sh-primary" onClick={() => onImport(activeProject ?? undefined)}><Plus size={17} />导入资料</button></div></header>
       {error && <div className="sh-error" role="alert"><strong>资料暂时未能完整载入</strong><span>{error}</span><span>请刷新页面后重试。</span></div>}
       {loading ? <div className="sh-loading" role="status"><BookOpen size={26} /><p>正在载入你的学习项目…</p></div> : !projects.length ? !error && <div className="sh-empty">
         <span className="sh-empty-icon"><BookOpen size={36} strokeWidth={1.3} /></span><h2>还没有学习资料</h2><p>从右上角导入 PDF 或 PPTX，按课程建立项目。</p><small>单份不超过 20 MiB</small>{onSample && <button type="button" className="sh-sample" onClick={onSample}>打开示例讲义<ArrowRight size={16} /></button>}
       </div> : <>
         {recent && activeProject === null && !search && <section className="sh-resume" aria-labelledby="sh-resume-title"><div className="sh-resume-body"><span className="sh-resume-label"><History size={15} />继续学习</span><p className="sh-resume-course">{recent.course}</p><h2 id="sh-resume-title">{title(recent)}</h2><p><span className="sh-resume-date">上次读到第 {recentPage} 页</span></p><button type="button" onClick={() => onOpenDoc(recent)} className="sh-resume-button">继续阅读<ArrowRight size={17} /></button></div><div className="sh-page-motif" aria-hidden="true"><FileText size={42} strokeWidth={1} /><span>{recent.kind.toUpperCase()}</span></div></section>}
         <div className="sh-section-heading"><div><h2>{activeProject === null ? '我的项目' : '项目资料'}</h2><span>{activeProject === null ? `${projects.length} 个项目` : `${docs.filter(doc => doc.course === activeProject).length} 份资料`}</span></div><div className="sh-tools">{activeProject&&onOpenMemory&&<button type="button" className="sh-memory-link" onClick={()=>onOpenMemory(activeProject)}>复习主题</button>}<label className="sh-search" htmlFor={searchId}><Search size={17} /><span className="sh-sr-only">搜索项目、资料或提问</span><input id={searchId} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索项目、资料或提问" />{query && <button type="button" aria-label="清除搜索" onClick={() => setQuery('')}><X size={15} /></button>}</label></div></div>
-        {search && <p className="sh-search-status" role="status">{activeProject !== null ? `在「${activeProject}」中` : '全部项目中'}找到 {visible.length} 份相关资料</p>}
+        {search && <p className="sh-search-status" role="status">{activeProject !== null ? `在「${activeProject}」中` : '全部项目中'}找到 {visible.length} 份相关资料{matchingProjects.length ? `，${matchingProjects.length} 个项目` : ''}</p>}
+        {search&&matchingProjects.length>0&&<section className="sh-project-search" aria-label="匹配的项目">{activeProject!==null&&<button type="button" onClick={()=>setProject(null)}>搜索全部项目</button>}{matchingProjects.map(name=><button type="button" key={name} onClick={()=>setProject(name)}><FolderOpen size={15}/><span>{name||'未分类项目'}</span><small>{docs.filter(doc=>doc.course===name).length} 份资料</small><ChevronRight size={15}/></button>)}</section>}
         {!search && activeProject === null && <div className="sh-projects" aria-label="我的项目">{projects.map((name, index) => { const projectDocs = docs.filter(doc => doc.course === name); const ids = new Set(projectDocs.map(doc => doc.id)); const count = threads.filter(thread => ids.has(thread.docId) && thread.messages.length).length; return <button type="button" key={name} className="sh-project-card" onClick={() => setProject(name)}><span className="sh-folder" data-tone={index % 4}><FolderOpen size={20} strokeWidth={1.5} /></span><h3>{name || '未分类项目'}</h3><p>{projectDocs.length} 份资料<span>{count} 条讨论</span></p><span className="sh-project-open">进入项目<ChevronRight size={16} /></span></button>; })}</div>}
         {(search || activeProject !== null || recentDocs.length>0) && <section className="sh-documents" aria-label={search ? '搜索结果' : activeProject !== null ? '项目资料' : '最近资料'}>
           {!search && activeProject === null ? <h2>最近阅读</h2> : sortedVisible.length>0 && <div className="sh-document-toolbar"><select className="sh-sort" aria-label="文件排序方式" value={sort} onChange={event => setSort(event.target.value === 'name' ? 'name' : 'recent')}><option value="recent">最近打开</option><option value="name">文件名称</option></select></div>}

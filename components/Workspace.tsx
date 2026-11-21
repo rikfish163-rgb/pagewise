@@ -18,6 +18,7 @@ import 'katex/dist/katex.min.css';
 import './markdown-answer.css';
 import { TutorControls, useTutorSettings } from './TutorControls';
 import StudyHome from './StudyHome';
+import PaperLeaves from './PaperLeaves';
 import {readProgress,recentReader} from './reading-progress';
 import StudyAccount from './StudyAccount';
 import { chargeLimit, creditNumber, useStudyCredits } from './useStudyCredits';
@@ -602,11 +603,11 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const allDocs=docs.length?docs:[sample];
  return <main className="workspace">
  {canReturnToReading&&<button type="button" className="reader-return" onClick={returnToReading}>返回刚才的位置</button>}
- <header className="masthead">{!home&&<button className="icon-button" aria-label="切换资料库" onClick={()=>{if(window.innerWidth>950)collapse(!collapsed);else setLibrary(!library)}}><Icon name="menu"/></button>}<a className="brand" href="#home" aria-label="页边首页"><span className="brand-mark"><Icon name="book" size={24}/></span><span>页边<span className="brand-en">MARGIN</span></span></a>{!home&&<a className="hub-link" href="#home" title="学习首页"><LibraryBig size={16}/><span>学习首页</span></a>}<PersonalApi active={personal} connection={connection} gatewayActive={gatewayActive}
+ <header className={`masthead ${home?'is-home':''}`}>{!home&&<button className="icon-button" aria-label="切换资料库" aria-expanded={!collapsed||library} onClick={()=>{if(window.innerWidth>767)collapse(!collapsed);else setLibrary(!library)}}><Icon name="menu"/></button>}<a className="brand" href="#home" aria-label="页边首页"><span className="brand-mark"><Icon name="book" size={24}/></span><span>页边<span className="brand-en">MARGIN</span></span></a>{!home&&<a className="hub-link" href="#home" title="学习首页"><LibraryBig size={16}/><span>学习首页</span></a>}<PersonalApi active={personal} connection={connection} gatewayActive={gatewayActive}
  onGateway={value=>{setConnection(value);setGatewayActive(!!value);if(value)setPersonal(null)}}
  onChange={profile=>{setGatewayActive(false);setPersonal(profile)}}/>{!home&&<button className="import-button" onClick={()=>openImport(doc.course)}><span>导入讲义</span></button>}<button className="account-trigger" type="button" title="我的账户与学习积分" aria-label="我的账户与学习积分" onClick={()=>setAccount(true)}><CircleUserRound size={19}/><span>我的账户</span></button></header>
  {account&&<StudyAccount showAdmin={showAdmin} accountSource={accountSource} onClose={()=>{setAccount(false);void credits.refresh();}}/>}
- <div className="home-surface" hidden={!home}>{libraryLoaded?<StudyHome docs={docs} savedProjects={savedProjects} onCreateProject={async name=>{
+ <div className="home-surface" hidden={!home}><PaperLeaves/>{libraryLoaded?<StudyHome docs={docs} savedProjects={savedProjects} onCreateProject={async name=>{
    const created=await request<{name:string}>('/projects',json({name}));
    setSavedProjects(values=>[...new Set([...values,created.name])]);
    return created.name;

@@ -3,12 +3,14 @@
   grid-template-columns: 228px minmax(0, 1fr);
   min-height: 100dvh;
 }
+.shell{position:relative;background:transparent}
 
 .sidebar {
   padding: 30px 16px;
   border-inline-end: 1px solid var(--line);
   background: var(--paper);
 }
+.sidebar{background:color-mix(in srgb,var(--paper) 70%,transparent)}
 
 .brand {
   display: inline-flex;

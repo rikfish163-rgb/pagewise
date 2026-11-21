@@ -174,7 +174,7 @@ export default function Notebook({visible,inserts,onAppend}:{visible:boolean;ins
        role="region" aria-label="笔记预览" onKeyDown={scrollPreview}>{previewContent()}</div>:
        <textarea ref={area} disabled={revision<0} aria-label="Markdown 学习笔记" value={body} onChange={e=>setBody(e.target.value)} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='b'){e.preventDefault();wrap('**','**')}}} placeholder="写下你的笔记…"/>}
    </div>
-   <footer className="nb-status"><span role="status">{status==='已同步'&&<Check size={13}/>} {status}</span><span>{body.length.toLocaleString()} 字符</span></footer>
+   <footer className="nb-status"><span role="status" className={status==='已同步'?'nb-status-saved':''}>{status==='已同步'&&<Check size={13}/>} {status}</span><span>{body.length.toLocaleString()} 字符</span></footer>
    <dialog ref={node=>{stage.current=node;if(node)setDialogPortal(node)}} className="nb-dialog" onClose={()=>setExpanded(false)}><header><strong>学习笔记</strong>{expanded&&outline(true)}{slide&&navigation()}<button aria-label="关闭放大预览" onClick={()=>stage.current?.close()}>关闭</button></header>{expanded&&<div ref={node=>{expandedPreviewHost.current=node;setExpandedPreviewElement(node)}} className={'nb-preview'+(slide?' paper-stage':'')}
      tabIndex={0} role="region" aria-label="放大的笔记预览" onKeyDown={scrollPreview}>{previewContent()}</div>}</dialog>
  </section>

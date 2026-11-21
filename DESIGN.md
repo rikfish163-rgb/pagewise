@@ -4,9 +4,9 @@ A Chinese learning workspace, not a chat landing page. The actual lecture is the
 
 ## Direction
 
-Codex Absolutely light: opaque warm surface `#f5f3ee`, ink `#1d1b16`, accent `#da7756`, contrast setting 60. Use darker terracotta for small text and ink on filled accent buttons. Use the system sans-serif stack for navigation, controls, forms and long discussion text. Reserve self-hosted LXGW WenKai for the brand, section and document titles, and short excerpts. Self-hosted WOFF2 files cover the interface first and load additional glyphs on demand. Code retains JetBrains Mono for alignment; original PDF/PPT pages and KaTeX equations keep their own typography.
+Warm paper light and charcoal dark themes, with text and components using theme-aware tokens in `app/globals.css`. The terracotta accent distinguishes links and active controls. The account appearance controls offer light, dark and system modes, and a local background-motion setting. Use the existing LXGW WenKai files for the brand, section and document titles, and short excerpts. Keep navigation, controls, forms and long discussion text on the system sans-serif stack. Code uses JetBrains Mono. Original PDF/PPT pages and KaTeX equations keep their own typography.
 
-The desktop is a 208px course shelf, flexible document stage and 360px discussion margin. At tablet widths the shelf becomes a drawer. On mobile the document remains full width, with an explicit discussion switch and return control. Native select keeps every discussion accessible without overflowing a tab row.
+The desktop is a course shelf, flexible document stage and adjustable discussion margin. The home and project pages prioritize resume reading and actual recent documents. At tablet widths the shelf opens as a drawer. On mobile the document remains full width, with an explicit discussion switch and a return-to-reading control. Paper texture stays faint behind content. Floating decorative leaves appear in desktop home-page whitespace, pause for reduced motion and are removed on mobile. Keep native PDF/PPT and image colors unchanged.
 
 ## Interaction contracts
 
@@ -15,6 +15,7 @@ The desktop is a 208px course shelf, flexible document stage and 360px discussio
 - Course memory lists actual answered discussions and actual response references, never invented examples.
 - Upload requires a course and PDF/PPTX. Delete confirms its actual cascading effect. API errors stay visible in the relevant discussion or dialog.
 - Keyboard focus, readable labels, reduced motion and mobile reading are supported. No credential is requested in the browser.
+- Pagewise drafts preserve their document and discussion ownership. Opening a citation restores the originating reader location. Saving a notebook displays the confirmed server status.
 
 ## Initial audit and acceptance
 

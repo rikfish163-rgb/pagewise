@@ -10,6 +10,17 @@
 @media(max-width:650px){.hub-link{padding:4px;border:0}.hub-link span{display:none}.workspace .masthead .import-button{inline-size:auto;padding:0 10px}.workspace .account-trigger{width:32px;height:32px}}
 @media(min-width:651px){.account-trigger{width:auto;border-radius:6px;padding-inline:10px;white-space:nowrap;font-size:14px}}
 @media(max-width:650px){.account-trigger span{display:none}}
+.workspace .masthead{background:color-mix(in srgb,var(--paper) 94%,transparent);transition:background-color .22s,box-shadow .22s}
+.workspace .masthead.is-home{background:color-mix(in srgb,var(--paper) 78%,transparent)}
+.workspace .masthead:not(.is-home){box-shadow:0 3px 16px color-mix(in srgb,var(--ink) 5%,transparent)}
+.workspace .masthead.is-home .brand{min-width:180px}
+.workspace .masthead .brand>span:last-child{color:var(--ink)}
+.workspace .masthead :is(a:not(.brand),.text-button){position:relative;text-decoration:none}
+.workspace .masthead :is(a:not(.brand),.text-button)::after{content:"";position:absolute;bottom:1px;left:0;width:100%;height:1px;background:currentColor;transform:scaleX(0);transform-origin:left;transition:transform .2s ease}
+.workspace .masthead :is(a:not(.brand),.text-button):hover::after,.workspace .masthead :is(a:not(.brand),.text-button):focus-visible::after{transform:scaleX(1)}
+.workspace .brand-mark{border-radius:50%;background:color-mix(in srgb,var(--accent-soft) 62%,transparent)}
+.workspace .import-button{min-height:40px;padding-inline:17px;border-radius:6px}
+@media(prefers-reduced-motion:reduce){.workspace .masthead,.workspace .masthead :is(a:not(.brand),.text-button)::after{transition:none}}
 .home-surface{height:calc(100dvh - 48px);overflow:auto}
 .answer-source{font-size:13px;color:var(--accent-ink);padding:4px 0;margin-right:14px}
 .workspace .masthead .brand>span:last-child{font-size:23px;line-height:1.05}

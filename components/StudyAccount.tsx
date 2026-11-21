@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { useTheme } from './ThemeProvider';
 import { creditNumber, hasPricing, type Pricing } from './useStudyCredits';
 import './study-account.css';
 
@@ -107,6 +108,7 @@ const timestamp = new Intl.DateTimeFormat('zh-CN', {
 export default function StudyAccount({ onClose, showAdmin = false, accountSource = 'chatgpt' }: {
   onClose: () => void; showAdmin?: boolean; accountSource?: 'chatgpt' | 'oidc';
 }) {
+  const { theme, setTheme } = useTheme();
   const dialog = useRef<HTMLDialogElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const ledgerHeading = useRef<HTMLHeadingElement>(null);
@@ -118,6 +120,7 @@ export default function StudyAccount({ onClose, showAdmin = false, accountSource
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [retryCursors, setRetryCursors] = useState<(string | null)[]>([null]);
+  const backgroundMotion = useRef<HTMLInputElement>(null);
 
   async function load(target: (string | null)[] = [null], focusLedger = false) {
     request.current?.abort();
@@ -151,6 +154,12 @@ export default function StudyAccount({ onClose, showAdmin = false, accountSource
   }
 
   useEffect(() => {
+    const enabled = localStorage.getItem('pagewise:background-motion') !== 'off';
+    if (backgroundMotion.current) backgroundMotion.current.checked = enabled;
+    document.documentElement.dataset.backgroundMotion = enabled ? 'on' : 'off';
+  }, []);
+
+  useEffect(() => {
     const element = dialog.current;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
@@ -178,6 +187,16 @@ export default function StudyAccount({ onClose, showAdmin = false, accountSource
       <button ref={closeButton} type="button" className="study-account__close" aria-label="关闭个人账户" onClick={onClose}><span aria-hidden="true">×</span></button>
     </header>
     <div className="study-account__scroll">
+      <section className="study-account__appearance" aria-labelledby="study-account-appearance">
+        <div><h3 id="study-account-appearance">外观</h3><p>选择阅读时的明暗主题。</p></div>
+        <div className="study-account__appearance-options" role="group" aria-label="外观主题">
+          {([['system', '跟随系统'], ['light', '浅色'], ['dark', '深色']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={theme === value} onClick={() => setTheme(value)}>{label}</button>)}
+        </div>
+      </section>
+      <section className="study-account__appearance" aria-labelledby="study-account-background">
+        <div><h3 id="study-account-background">背景动效</h3><p>在首页和项目页显示缓慢的叶片。</p></div>
+        <label className="study-account__switch"><input ref={backgroundMotion} type="checkbox" defaultChecked onChange={event => {const enabled=event.currentTarget.checked;localStorage.setItem('pagewise:background-motion',enabled?'on':'off');document.documentElement.dataset.backgroundMotion=enabled?'on':'off';}}/><span>显示叶片</span></label>
+      </section>
       <nav className="study-account__auth" aria-label="账户操作">
         <a href="/login">登录方式</a>
         {showAdmin && <a href="/admin/credits">积分管理</a>}

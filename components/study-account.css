@@ -91,3 +91,12 @@
 .study-account__auth{display:flex;flex-wrap:wrap;gap:5px 18px;align-items:center;padding-top:12px;font-size:.875rem}
 .study-account__auth form{margin:0}
 .study-account__auth a,.study-account__auth button{display:inline-flex;align-items:center;min-height:36px;padding:0;color:var(--accent-ink);text-decoration:underline;text-underline-offset:3px}
+.study-account__appearance{display:grid;grid-template-columns:minmax(125px,1fr) auto;align-items:center;gap:16px;padding:17px 0;border-bottom:1px solid var(--line)}
+.study-account__appearance h3{font:500 16px/1.5 var(--font-serif);margin:0}
+.study-account__appearance p{margin:3px 0 0;color:var(--muted);font-size:13px;line-height:1.55}
+.study-account .study-account__appearance-options{display:flex;gap:3px;padding:3px;border-radius:6px;background:var(--wash)}
+.study-account .study-account__appearance-options button{min-height:36px;padding:0 10px;border-radius:4px;color:var(--muted);font-size:13px;white-space:nowrap}
+.study-account .study-account__appearance-options button[aria-pressed="true"]{background:var(--paper);color:var(--ink);box-shadow:0 1px 4px color-mix(in srgb,var(--ink) 12%,transparent)}
+.study-account .study-account__switch{display:flex;align-items:center;gap:8px;color:var(--accent-ink);font-size:13px;cursor:pointer}
+.study-account .study-account__switch input{width:18px;height:18px;accent-color:var(--accent)}
+@media(max-width:520px){.study-account__appearance{grid-template-columns:1fr}.study-account .study-account__appearance-options{width:max-content;max-width:100%}.study-account .study-account__appearance-options button{padding-inline:9px}}
