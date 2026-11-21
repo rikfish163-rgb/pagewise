@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Scan, TextSelect, ZoomIn, ZoomOut } from 'lucide-react';
 import { normalizedRect, pixelRect, pageWithin, type Rect } from './reader-geometry';
 import 'pdfjs-dist/web/pdf_viewer.css';
@@ -8,7 +8,8 @@ import './reader.css';
 import {readProgress,recentReader,saveProgress,type ReadingProgress} from './reading-progress';
 
 export type ReaderSelection = { page: number; text?: string; image?: string; rect?: number[] };
-type Props = { documentId:string; navigation:{resume:boolean;revision:number}; lookup: React.RefObject<import('./study-context').PageReader|null>; url: string; kind: 'pdf'|'pptx'; page: number; onPage: (page:number)=>void; onSelect: (s:ReaderSelection)=>void; onDismiss:()=>void; focusRect?: number[]; focusPage?: number };
+export type ReaderAnnotation = {id:string;page:number;label:string;rect?:number[]};
+export type Props = { documentId:string; navigation:{resume:boolean;revision:number}; lookup: React.RefObject<import('./study-context').PageReader|null>; url: string; kind: 'pdf'|'pptx'; page: number; onSelect: (s:ReaderSelection,action?:'ask'|'add'|'save')=>void; onCrop: (s:ReaderSelection)=>boolean; onCropState:(pending:boolean)=>void; onPage: (page:number)=>void; onDismiss:()=>void; focusRect?: number[]; focusPage?: number; annotations?:ReaderAnnotation[]; onOpenAnnotation?:(id:string,page:number)=>void };
 type PdfDocument = import('pdfjs-dist').PDFDocumentProxy;
 type Deck = { pres: Awaited<ReturnType<typeof import('@office-kit/pptx').loadPresentation>>; slides: ReturnType<typeof import('@office-kit/pptx').getSlides> };
 
@@ -52,17 +53,23 @@ function addSlideTextLayer(layer: HTMLDivElement) {
   });
 }
 
-export default function Reader({documentId,navigation,lookup,url,kind,page,onPage,onSelect,onDismiss,focusRect,focusPage}: Props) {
+export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,page,onPage,onSelect,onCrop,onCropState,onDismiss,focusRect,focusPage,annotations=[],onOpenAnnotation}: Props) {
   const [pdf, setPdf] = useState<PdfDocument|null>(null);
   const [deck, setDeck] = useState<Deck|null>(null);
   const [count,setCount] = useState(0), [busy,setBusy] = useState(true), [error,setError] = useState('');
   const [zoom,setZoom] = useState(1), [mode,setMode] = useState<'text'|'crop'>('text');
+  const [layout,setLayout]=useState<'continuous'|'single'>(kind==='pptx'?'single':'continuous');
+  const [selectionAction,setSelectionAction]=useState<ReaderSelection|null>(null);
+  const queueSelection=(selection:ReaderSelection)=>setSelectionAction(selection);
+  const [cropFeedback,setCropFeedback]=useState<{message:string;rect:number[];page:number}|null>(null);
+  const feedbackTimer=useRef<number|null>(null);
   const [revision,setRevision] = useState(0);
   const scroll=useRef<HTMLDivElement>(null);
   const stack=useRef<HTMLDivElement>(null);
   const current=pageWithin(page,count);
   const reported=useRef(0);
   const navigationSeen=useRef(-1);
+  const layoutSeen=useRef(layout);
   const restoring=useRef<ReadingProgress|null>(null);
   const observer=useRef<ResizeObserver|null>(null);
   const programmaticScroll=useRef<number|null>(null);
@@ -84,7 +91,7 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
     programmaticScroll.current=reader.scrollTop;
   }
 
-  function saveLocation(reader:HTMLDivElement,pages:HTMLDivElement,visiblePage:number){
+  const saveLocation=useCallback((reader:HTMLDivElement,pages:HTMLDivElement,visiblePage:number)=>{
     const first=(pages.children[0] as HTMLElement).offsetTop;
     let low=0,high=pages.children.length-1;
     while(low<high){
@@ -97,11 +104,11 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
     const span=next?next.offsetTop-anchor.offsetTop:anchor.offsetHeight;
     const offset=reader.scrollTop-(anchor.offsetTop-first);
     saveProgress(documentId,{page:visiblePage,anchorPage:low+1,fraction:Math.max(0,Math.min(1,offset/Math.max(1,span)))});
-  }
+  },[documentId]);
 
   function readScroll(){
     const reader=scroll.current,pages=stack.current;
-    if(!reader||!pages||!count||pages.children.length!==count||restoring.current||reader.scrollTop===programmaticScroll.current)return;
+    if(layout==='single'||!reader||!pages||!count||pages.children.length!==count||restoring.current||reader.scrollTop===programmaticScroll.current)return;
     programmaticScroll.current=null;
     const line=reader.getBoundingClientRect().top+Math.min(72,reader.clientHeight*.2);
     let first=0,last=count-1;
@@ -124,7 +131,7 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
   function goToPage(next:number){
     stopRestoring();
     const reader=scroll.current,pages=stack.current;
-    if(reader&&pages){
+    if(layout==='continuous'&&reader&&pages){
       jump(reader,pages,next);
       saveLocation(reader,pages,next);
     }
@@ -141,9 +148,12 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
     const reader=scroll.current,pages=stack.current;
     if(!reader||!pages||!count)return;
     const explicit=navigationSeen.current!==navigation.revision;
-    if(!explicit&&reported.current===current)return;
+    const layoutChanged=layoutSeen.current!==layout;
+    if(!explicit&&!layoutChanged&&reported.current===current)return;
     navigationSeen.current=navigation.revision;
+    layoutSeen.current=layout;
     stopRestoring();
+    if(layout==='single'){reported.current=current;return;}
     const position=explicit&&navigation.resume?readProgress(documentId):null;
     reported.current=current;
     if(position){
@@ -162,7 +172,7 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
       jump(reader,pages,current);
       saveLocation(reader,pages,current);
     }
-  },[count,current,documentId,navigation.revision,navigation.resume]);
+  },[count,current,documentId,navigation.revision,navigation.resume,layout,saveLocation]);
 
   useEffect(()=>{
     function flush(){if(scrollFrame.current){cancelAnimationFrame(scrollFrame.current);scrollFrame.current=0;readScroll();}}
@@ -173,6 +183,8 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
   useEffect(()=>{
     function dismiss(e:KeyboardEvent) {
       if(e.key!=='Escape'||e.defaultPrevented||e.isComposing||document.querySelector('dialog[open], [aria-modal="true"]')) return;
+      setSelectionAction(null);
+      if(mode==='crop') { setMode('text'); return; }
       setMode('text');
       const range=window.getSelection();
       if(range?.anchorNode && scroll.current?.contains(range.anchorNode)) range.removeAllRanges();
@@ -180,7 +192,7 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
     }
     document.addEventListener('keydown',dismiss);
     return ()=>document.removeEventListener('keydown',dismiss);
-  },[onDismiss]);
+  },[mode,onDismiss]);
 
   useEffect(()=>{
     if(count<2||error)return;
@@ -225,9 +237,12 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
   },[url,kind,revision]);
 
 
-  useEffect(()=>{
+  useLayoutEffect(()=>{
     if(!pdf&&!deck)return;
-    lookup.current={count,read:async(n,includeImage=true)=>{
+    lookupRef.current={count,getLocation:()=>{const saved=readProgress(documentId);return {page:current,scrollTop:scroll.current?.scrollTop??0,anchorPage:saved?.anchorPage??current,fraction:saved?.fraction??0,layout}},restoreLocation:location=>{
+      setLayout(location.layout);reported.current=location.page;onPage(location.page);
+      requestAnimationFrame(()=>{const reader=scroll.current,pages=stack.current;if(!reader||!pages)return;if(location.layout==='continuous'&&pages.children.length===count){jump(reader,pages,pageWithin(location.anchorPage,count),location.fraction);saveLocation(reader,pages,location.page)}else reader.scrollTop=location.scrollTop});
+    },read:async(n,includeImage=true)=>{
       if(!pdf&&!deck)throw Error('课件正在加载，请稍后重试。');
       if(n<1||n>count)throw Error(`讲义共 ${count} 页，找不到第 ${n} 页。`);
       let image:string|undefined,content:string;
@@ -237,11 +252,14 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
       }else{const {renderSlideToSvg}=await import('@office-kit/pptx-preview');const markup=await safeSvg(renderSlideToSvg(deck!.pres,deck!.slides[n-1],{textLayout:'svg',eastAsianFamily:'sans-serif'}));content=Array.from(new DOMParser().parseFromString(markup,'image/svg+xml').querySelectorAll('text'),t=>t.textContent).join(' ');if(includeImage)image='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(markup);}
       return {page:n,text:content.slice(0,4500),image};
     }};
-    return ()=>{lookup.current=null};
-  },[pdf,deck,count,lookup]);
+    return ()=>{lookupRef.current=null};
+  },[pdf,deck,count,lookupRef,documentId,current,layout,onPage,saveLocation]);
 
 
+  const visiblePages=layout==='single'?[current]:Array.from({length:count},(_,index)=>index+1);
+  const thumbnailPages=Array.from({length:count},(_,index)=>index+1).slice(Math.max(0,current-3),Math.min(count,current+2));
   return <section className="document-reader" aria-label="文档阅读器">
+    {selectionAction&&<div className="reader-selection-actions" role="group" aria-label="选区操作"><span title={selectionAction.text||'已框选图片'}>{selectionAction.text||'图表选区'} · 第 {selectionAction.page} 页</span><button type="button" onClick={()=>{onSelect(selectionAction,'ask');setSelectionAction(null)}}>提问</button><button type="button" onClick={()=>{onSelect(selectionAction,'add');setSelectionAction(null)}}>加入当前问题</button>{selectionAction.text&&<button type="button" onClick={()=>{onSelect(selectionAction,'save');setSelectionAction(null)}}>存为摘录</button>}<button type="button" aria-label="取消选区操作" onClick={()=>setSelectionAction(null)}>取消</button></div>}
     <div className="reader-toolbar">
       <div><button aria-label="上一页" disabled={current<=1 || !count} onClick={()=>goToPage(current-1)}><ChevronLeft size={17}/></button>
       <form className="reader-jump" onSubmit={e=>{
@@ -256,19 +274,29 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
         <button type="submit" disabled={!count}>跳转</button>
       </form>
       <button aria-label="下一页" disabled={current>=count} onClick={()=>goToPage(current+1)}><ChevronRight size={17}/></button></div>
+      <details className="reader-thumbnails"><summary aria-label="打开页面缩略图">缩略图</summary><div role="listbox" aria-label="选择页面">{thumbnailPages.map(number=><button type="button" role="option" aria-selected={current===number} key={number} onClick={()=>goToPage(number)}><span>第 {number} 页</span><div className="reader-thumbnail"><ContinuousPage current={number} pdf={pdf} deck={deck} kind={kind} zoom={1} mode="text" onSelect={()=>{}} priority focusRect={undefined}/></div></button>)}</div></details>
       <div><button aria-pressed={mode==='text'} onClick={()=>setMode('text')}><TextSelect size={16}/>选文字</button>
       <button aria-pressed={mode==='crop'} onClick={()=>setMode('crop')}><Scan size={16}/>框选图片</button>
+      <button aria-pressed={layout==='continuous'} onClick={()=>setLayout('continuous')}>连续</button>
+      <button aria-pressed={layout==='single'} onClick={()=>setLayout('single')}>单页</button>
       <button aria-label="缩小" disabled={zoom<=0.75} onClick={()=>setZoom(z=>Math.max(.75,z-.25))}><ZoomOut size={17}/></button>
       <button aria-label="放大" disabled={zoom>=2} onClick={()=>setZoom(z=>Math.min(2,z+.25))}><ZoomIn size={17}/></button></div>
     </div>
     {error && <div className="reader-error" role="alert">{error} <button onClick={()=>setRevision(r=>r+1)}>重新加载</button></div>}
-    <div className="reader-scroll" ref={scroll} onScroll={syncScroll} onWheel={stopRestoring} onTouchStart={stopRestoring} onPointerDown={stopRestoring}
+    <div className="reader-scroll" data-layout={layout} ref={scroll} onScroll={syncScroll} onWheel={stopRestoring} onTouchStart={stopRestoring} onPointerDown={stopRestoring}
       onKeyDown={event=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key))stopRestoring();}}>
       {!count&&busy && <div role="status" className="reader-loading">正在解析文档…</div>}
-      <div ref={stack} className="reader-page-stack">{Array.from({length:count},(_,i)=><ContinuousPage key={i+1} current={i+1} pdf={pdf} deck={deck}
-        kind={kind} zoom={zoom} mode={mode} onSelect={onSelect}
-        priority={Math.abs(i+1-current)<=1}
-        focusRect={(focusPage??current)===i+1?focusRect:undefined}/>)}</div>
+      <div ref={stack} className="reader-page-stack">{visiblePages.map(pageNumber=><div className="reader-annotated-page" key={pageNumber}><ContinuousPage current={pageNumber} pdf={pdf} deck={deck}
+        kind={kind} zoom={zoom} mode={mode} onSelect={queueSelection} onCrop={selection=>{
+          const added=onCrop(selection);
+          setCropFeedback({message:added?`已加入问题草稿 · 第 ${selection.page} 页`:'引用已满，请在提问框删除后再添加',rect:selection.rect??[],page:selection.page});
+          if(feedbackTimer.current!==null)window.clearTimeout(feedbackTimer.current);
+          feedbackTimer.current=window.setTimeout(()=>setCropFeedback(null),2400);
+          return added;
+        }} onCropState={onCropState} feedback={cropFeedback?.page===pageNumber?cropFeedback:null}
+        priority={Math.abs(pageNumber-current)<=1}
+        focusRect={(focusPage??current)===pageNumber?focusRect:undefined}
+        annotations={annotations.filter(item=>item.page===pageNumber)} onOpenAnnotation={onOpenAnnotation}/></div>)}</div>
     </div>
     {count>0&&<div className="reader-pagination">
       <span aria-hidden="true">1</span>
@@ -279,11 +307,12 @@ export default function Reader({documentId,navigation,lookup,url,kind,page,onPag
   </section>;
 }
 
-type ContinuousPageProps=Pick<Props,'kind'|'onSelect'|'focusRect'> & {
+type ContinuousPageProps=Pick<Props,'kind'|'onSelect'|'focusRect'|'annotations'|'onOpenAnnotation'> & {
+  onCrop:(selection:ReaderSelection)=>boolean;onCropState:(pending:boolean)=>void;feedback:{message:string;rect:number[];page:number}|null;
   current:number;zoom:number;mode:'text'|'crop';pdf:PdfDocument|null;deck:Deck|null;priority:boolean;
 };
 
-function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,onSelect,focusRect}:ContinuousPageProps){
+function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,onSelect,onCrop,onCropState,feedback,focusRect,annotations=[],onOpenAnnotation}:ContinuousPageProps){
   const [busy,setBusy]=useState(true),[error,setError]=useState('');
   const [ratio,setRatio]=useState(kind==='pdf'?1.414:16/9);
   const [visible,setVisible]=useState(false);
@@ -372,20 +401,23 @@ function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,onSelect,focus
         try { image.src=object;await image.decode(); } finally { URL.revokeObjectURL(object); }
         width=image.naturalWidth;height=image.naturalHeight;source=image;
       }
-      const [x,y,w,h]=pixelRect(rect,width,height), output=document.createElement('canvas');
+      const [x,y,w,h]=pixelRect(rect,width,height);
+      if(w<12||h<12){setError('选区太小，请重新框选更大的区域。');return;}
+      const output=document.createElement('canvas');
       output.width=w;output.height=h;output.getContext('2d')!.drawImage(source,x,y,w,h,0,0,w,h);
-      if(token===gesture.current) onSelect({page:selectedPage,image:output.toDataURL('image/png'),rect});
+      if(token===gesture.current) onCrop({page:selectedPage,image:output.toDataURL('image/png'),rect});
     } catch {setError('选区图片生成失败，请重新框选或将文档导出为 PDF 后重试。');}
+    finally {onCropState(false);}
   }
 
   const highlight=(mode==='crop'?drag:null)??focusRect;
   return <div ref={surface} data-page={current} className={`reader-page ${kind==='pdf'?'reader-pdf':'reader-pptx'} ${mode==='crop'?'reader-cropping':''}`} style={{width:`${zoom*100}%`,aspectRatio:ratio}}
-        onPointerDown={e=>{cancelled.current=false;gesture.current++;if(mode==='crop' && nearby && !busy){start.current=[e.clientX,e.clientY];e.currentTarget.setPointerCapture(e.pointerId);e.preventDefault();}}}
+        onPointerDown={e=>{cancelled.current=false;gesture.current++;if(mode==='crop' && nearby && !busy){onCropState(true);start.current=[e.clientX,e.clientY];e.currentTarget.setPointerCapture(e.pointerId);e.preventDefault();}}}
         onPointerMove={e=>{if(start.current) setDrag(normalizedRect(start.current,[e.clientX,e.clientY],e.currentTarget.getBoundingClientRect()));}}
-        onPointerCancel={()=>{start.current=null;setDrag(null);}}
+        onPointerCancel={()=>{if(start.current)onCropState(false);start.current=null;setDrag(null);}}
         onPointerUp={e=>{
           if(cancelled.current){window.getSelection()?.removeAllRanges();return;}
-          if(start.current) {const rect=normalizedRect(start.current,[e.clientX,e.clientY],e.currentTarget.getBoundingClientRect());start.current=null;setDrag(null);if(rect) void crop(rect);return;}
+          if(start.current) {const rect=normalizedRect(start.current,[e.clientX,e.clientY],e.currentTarget.getBoundingClientRect());start.current=null;setDrag(null);if(rect) void crop(rect);else onCropState(false);return;}
           if(mode!=='text'||busy||!nearby)return;
           const selected=window.getSelection();if(!selected?.rangeCount || selected.isCollapsed)return;
           const range=selected.getRangeAt(0);if(!surface.current?.contains(range.commonAncestorContainer))return;
@@ -398,5 +430,7 @@ function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,onSelect,focus
         </>}
         {error&&nearby&&<div className="reader-error" role="alert">{error}</div>}
         {(highlight) && <div className="reader-highlight" style={{left:`${highlight[0]*100}%`,top:`${highlight[1]*100}%`,width:`${highlight[2]*100}%`,height:`${highlight[3]*100}%`}}/>}
+        {feedback&&<div className="reader-crop-feedback" role="status" aria-live="polite" style={{left:`${Math.min(72,Math.max(4,feedback.rect[0]*100))}%`,top:`${Math.min(82,Math.max(4,(feedback.rect[1]+feedback.rect[3])*100+2))}%`}}>{feedback.message}</div>}
+        {annotations.map((annotation,index)=><button type="button" className="reader-page-annotation" key={annotation.id} title={annotation.label} style={annotation.rect?{left:`${annotation.rect[0]*100}%`,top:`${annotation.rect[1]*100}%`}:{right:8,top:8+index*38}} onClick={()=>onOpenAnnotation?.(annotation.id,annotation.page)}>{annotation.label}</button>)}
       </div>;
 }

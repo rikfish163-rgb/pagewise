@@ -13,6 +13,12 @@
 .citation-tools .citation-locate{display:inline-flex;min-width:0;align-items:center;gap:5px;padding:0;text-align:left}
 .citation-chip small,.citation-tools .citation-remove{flex:none}
 .citation-tools .citation-remove{width:24px;min-height:24px;padding:0;line-height:1}
+.workspace .reader-return{position:absolute;z-index:20;top:54px;left:50%;transform:translateX(-50%);min-height:36px;padding:7px 13px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--accent-ink);box-shadow:0 4px 14px #201b1618}
+.workspace .reader-toolbar{flex-wrap:wrap;overflow:visible;gap:5px}
+.workspace .reader-toolbar>div{flex-wrap:wrap;white-space:normal}
+.workspace .reader-toolbar button{min-height:34px;padding:4px 6px}
+.workspace .reader-return:hover{background:var(--accent-soft)}
+@media(max-width:650px){.workspace .reader-return{top:auto;bottom:14px;left:50%;z-index:60;transform:translateX(-50%);white-space:nowrap}.reader-selection-actions{flex-wrap:wrap}.reader-selection-actions>span{flex-basis:100%}}
 .selected-passage .text-button{margin-left:auto}
 .selected-passage .image-remove{margin-left:6px;width:24px;min-height:24px;border-radius:4px;font-size:16px}
 .selected-passage .image-remove:hover{background:var(--accent-soft)}
@@ -38,6 +44,10 @@
 .thread-options{position:absolute;z-index:10;top:100%;inset-inline:0;max-height:240px;overflow:auto;background:var(--paper);border:1px solid var(--line);border-radius:5px;box-shadow:0 5px 16px #2920181a}
 .thread-options button{display:block;width:100%;padding:8px;text-align:left;font-size:12px}
 .thread-options button:hover,.thread-options button[aria-current=true]{background:var(--accent-soft)}
+.thread-search-label{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:7px;padding:8px;background:var(--paper);border-bottom:1px solid var(--line);color:var(--muted)}
+.thread-search-label input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;font-size:14px}
+.thread-search-empty{padding:12px;color:var(--muted);font-size:13px;text-align:center}
+.reader-annotation-list button{display:block}
 .thread-strip>.icon-button{justify-self:end}
 .project-memory>label{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--muted)}
 .project-memory select,.memory-status{border:1px solid var(--line);border-radius:5px;padding:5px 9px;background:var(--surface);color:var(--ink)}

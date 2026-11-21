@@ -6,6 +6,43 @@
 
 .study-home .sh-resume-button:hover{background:var(--accent-hover);color:var(--ink)}
 
+/* 首页把空间优先留给最近阅读的资料。 */
+.study-home .sh-header{margin-bottom:20px}
+.study-home .sh-resume{min-height:0;padding:17px 22px;margin-bottom:22px;align-items:center}
+.study-home .sh-resume-label{margin-bottom:6px}
+.study-home .sh-resume h2{font-size:20px;line-height:1.35}
+.study-home .sh-resume-date{margin-top:4px;font-size:13px}
+.study-home .sh-resume-button{margin-top:10px;min-height:38px}
+.study-home .sh-page-motif{width:68px;height:82px;margin-right:12px;transform:rotate(4deg)}
+.study-home .sh-projects{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px}
+.study-home .sh-project-card{min-height:0;display:grid;grid-template-columns:auto auto;align-items:center;column-gap:9px;row-gap:2px;padding:8px 12px;border-radius:7px}
+.study-home .sh-folder{width:25px;height:25px;margin:0;grid-row:span 2}
+.study-home .sh-project-card h3{font-size:14px}
+.study-home .sh-project-card p{margin:0;font-size:12px}
+.study-home .sh-project-open{display:none}
+.study-home .sh-documents{margin-top:14px}
+.study-home .sh-section-heading{margin-bottom:12px}
+.study-home .sh-search input{font-size:14px}
+.study-home .sh-document-copy strong{font-size:15px}
+.study-home .sh-document-copy>span,.study-home .sh-document time{font-size:13px}
+.study-home .sh-document{padding-block:12px}
+.study-home .sh-tools{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+.study-home .sh-memory-link{min-height:42px;padding:8px 12px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--accent-ink);font-size:14px;white-space:nowrap}
+.study-home .sh-memory-link:hover{background:var(--accent-soft)}
+@media(max-width:700px){
+  .study-home .sh-resume{padding:15px 16px}
+  .study-home .sh-resume h2{font-size:18px}
+  .study-home .sh-resume-button{margin-top:9px}
+  .study-home .sh-projects{gap:6px}
+  .study-home .sh-project-card{padding:7px 9px}
+  .study-home .sh-tools{justify-content:stretch;flex-direction:column-reverse;align-items:stretch}
+  .study-home .sh-memory-link{width:100%}
+}
+@media(prefers-reduced-motion:no-preference){
+  .study-home .sh-project-card,.study-home .sh-document,.study-home .sh-primary,.study-home .sh-resume-button{transition:background-color 140ms ease,border-color 140ms ease,transform 140ms ease}
+  .study-home .sh-project-card:hover{transform:translateY(-1px)}
+}
+
 .study-home .sh-project-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px;padding:16px 10px 7px;color:var(--muted);font-size:12px}
 .study-home .sh-create{display:inline-flex;align-items:center;gap:4px;min-height:34px;padding:4px 7px;background:transparent;border-radius:6px;color:var(--accent-ink)}
 .study-home .sh-create:hover{background:var(--accent-soft)}

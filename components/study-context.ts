@@ -2,6 +2,8 @@ import type {Selection} from '../lib/workspace-model';
 export type PageReader = {
  count:number;
  read:(page:number,includeImage?:boolean)=>Promise<Selection>;
+ getLocation:()=>{page:number;scrollTop:number;anchorPage:number;fraction:number;layout:'continuous'|'single'};
+ restoreLocation:(location:{page:number;scrollTop:number;anchorPage:number;fraction:number;layout:'continuous'|'single'})=>void;
 };
 
 export function isOverview(question:string){

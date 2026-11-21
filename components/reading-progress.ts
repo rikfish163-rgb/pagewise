@@ -14,7 +14,17 @@ export function readProgress(documentId:string):ReadingProgress|null{
 export function saveProgress(documentId:string,progress:ReadingProgress){
   try{
     localStorage.setItem(key(documentId),JSON.stringify(progress));
+    window.dispatchEvent(new Event('pagewise:reading-progress'));
   }catch{ /* Reading can continue when storage is unavailable. */ }
+}
+
+export function subscribeReadingProgress(onChange:()=>void){
+  window.addEventListener('storage',onChange);
+  window.addEventListener('pagewise:reading-progress',onChange);
+  return ()=>{
+    window.removeEventListener('storage',onChange);
+    window.removeEventListener('pagewise:reading-progress',onChange);
+  };
 }
 
 export function recentReader(documentId?:string){
