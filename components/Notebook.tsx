@@ -40,6 +40,7 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
  const [expanded,setExpanded]=useState(false);
  const {pages,headings}=useMemo(()=>preview?notebookNavigation(body):{pages:[],headings:[]},[body,preview]);
  const editor=useRef<HTMLDivElement>(null),previewHost=useRef<HTMLDivElement>(null),expandedPreviewHost=useRef<HTMLDivElement>(null);
+ const outlineTarget=useRef<number|null>(null);
  useEffect(()=>{
    if(expanded)expandedPreviewHost.current?.focus({preventScroll:true});
  },[expanded]);
@@ -92,7 +93,20 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
      </DropdownMenu.Trigger>
      <DropdownMenu.Portal container={inDialog?stage.current:undefined}>
        <DropdownMenu.Content className="nb-outline-menu" align="end" sideOffset={4} collisionPadding={6}
-         collisionBoundary={inDialog?stage.current:editor.current}>
+         collisionBoundary={inDialog?stage.current:editor.current}
+         onCloseAutoFocus={event=>{
+           const headingIndex=outlineTarget.current;
+           outlineTarget.current=null;
+           const host=(inDialog?expandedPreviewHost:previewHost).current;
+           if(headingIndex===null||!host)return;
+           const position=slide?headings[headingIndex]?.position:headingIndex;
+           event.preventDefault();
+           host.focus({preventScroll:true});
+           if(position!==undefined){
+             const headingsInPreview=host.querySelectorAll<HTMLElement>('.markdown-answer :is(h1,h2,h3,h4,h5,h6)');
+             headingsInPreview[position]?.scrollIntoView({block:'nearest'});
+           }
+         }}>
          {headings.map((heading,headingIndex)=><DropdownMenu.Item
            key={headingIndex}
            className="nb-outline-item"
@@ -100,12 +114,8 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
            title={heading.text}
            style={{'--heading-indent':Math.min(heading.level-1,3)*10+'px'} as CSSProperties}
            onSelect={()=>{
+             outlineTarget.current=headingIndex;
              if(slide)setPage(heading.slide);
-             requestAnimationFrame(()=>{
-               const host=inDialog?stage.current:previewHost.current;
-               const target=host?.querySelectorAll<HTMLElement>('.markdown-answer :is(h1,h2,h3,h4,h5,h6)')[slide?heading.position:headingIndex];
-               target?.scrollIntoView({block:'nearest'});
-             });
            }}>
            <span>{heading.text}</span>
          </DropdownMenu.Item>)}
