@@ -91,7 +91,9 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
    if(docId!==item.id||home){
      setDocId(item.id);
      requestReaderPage(sourcePage??lastPage(item.id),sourcePage===undefined);
-     newQuestion();
+     const draft=threads.find(thread=>thread.docId===item.id&&!thread.messages.length&&((thread.image&&!omitImage[thread.id])||thread.text||extras[thread.id]?.length||questions[thread.id]?.trim()));
+     if(draft){setActive(draft.id);setTab('discussions');}
+     else newQuestion();
    }else if(sourcePage!==undefined){requestReaderPage(sourcePage);}
    if(threadId)setActive(threadId);
    setMobilePanel(!!threadId);navigate(true);void organize(item,{visit:true});
@@ -115,7 +117,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const [remove,setRemove]=useState<{kind:'doc'|'thread';id:string;name:string}|null>(null),[deleting,setDeleting]=useState(false);
  const [quote,setQuote]=useState('');const [threadSearch,setThreadSearch]=useState('');useEffect(()=>setQuote(''),[active]);
  const lookup=useRef<PageReader|null>(null);
- const cropTarget=useRef<{docId:string;activeId:string;question:string}|null>(null);
+ const cropTargets=useRef(new Map<string,{docId:string;activeId:string;question:string}>());
  const returnLocation=useRef<ReturnType<PageReader['getLocation']>|null>(null);
  const [canReturnToReading,setCanReturnToReading]=useState(false);
  useEffect(()=>{
@@ -223,17 +225,16 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const noteInsertId=useRef(0);
  const [addedToNote,setAddedToNote]=useState(0);
  const latestInsert=inserts.at(-1);
- const [extras,setExtras]=useState<Record<string,(Selection & {fromAnswer?:boolean})[]>>({});
+ const [extras,setExtras]=useState<Record<string,(Selection & {fromAnswer?:boolean;attachmentId:string})[]>>({});
  const [attachmentReads,setAttachmentReads]=useState<Record<string,number>>({});
  const citations=extras[active]||[];
  const [omitPrimary,setOmitPrimary]=useState<Record<string,boolean>>({});
  const [omitImage,setOmitImage]=useState<Record<string,boolean>>({});
  function addCitation(id:string,selection:Selection & {fromAnswer?:boolean}){
    const current=extras[id]||[];
-   const imageCount=(id===active&&primaryImage?1:0)+current.length+(attachmentReads[id]??0);
-   if(imageCount>=12)return false;
+   if(current.length+(attachmentReads[id]??0)>=12)return false;
    attempts.current.delete(id);
-   setExtras(v=>({...v,[id]:[...(v[id]||[]),selection]}));
+   setExtras(v=>({...v,[id]:[...(v[id]||[]),{...selection,attachmentId:crypto.randomUUID()}]}));
    return true;
  }
  async function addImageAttachments(files:File[],pasted=false){
@@ -297,7 +298,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  function dropped(f:File,c?:string){if(!/\.(pdf|pptx)$/i.test(f.name)||f.size>20*1024*1024){setError('请选择 20 MiB 以内的 PDF 或 PPTX');return}setError('');setFile(f);if(c)setCourse(c);setUpload(true);}
  const samplePromise=useRef<Promise<string>|null>(null), savedDoc=useRef(''), bottom=useRef<HTMLDivElement>(null);
  const question=questions[active]||''; const setQuestion=(value:string)=>setQuestions(v=>({...v,[active]:value}));
- const doc=docs.find(d=>d.id===docId)||sample; const items=documentThreads(threads,doc.id); const existing=items.find(t=>t.id===active); const thread:Discussion=existing??{id:active,docId:doc.id,page,messages:[]}; const currentPending=!!pending[active];
+ const doc=docs.find(d=>d.id===docId)||sample; const allItems=documentThreads(threads,doc.id); const items=allItems.filter(t=>t.messages.length>0); const existing=allItems.find(t=>t.id===active); const thread:Discussion=existing??{id:active,docId:doc.id,page,messages:[]}; const currentPending=!!pending[active];
  const primaryImage=omitImage[active]?undefined:thread?.image;
  const croppedImageCount=(primaryImage?1:0)+citations.filter(item=>!!item.image).length;
  const primaryTextVisible=!!thread.text&&thread.text!=='按页提问'&&!omitPrimary[active];
@@ -306,35 +307,51 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const replayLabel=failedAsk?`重试原问题沿用上限 ${creditNumber.format(failedAsk.cap)} 分，已结算的请求不重复扣分。`:'';
  const priceLabel=replayQuestion?replayLabel:newAnswerPrice;
  const ready=!!gateway||(personal?(!primaryImage||personalVision):availability.ready);
- function removePrimaryImage(){setOmitImage(value=>({...value,[active]:true}));}
- function captureCrop(selection:Selection){
-   const target=cropTarget.current??{docId:doc.id,activeId:active,question};
+ function removePrimaryImage(){attempts.current.delete(active);setOmitImage(value=>({...value,[active]:true}));}
+ function captureCrop(selection:Selection & {captureId?:string}){
+   const {captureId,...screenshot}=selection;
+   const target=(captureId?cropTargets.current.get(captureId):undefined)??{docId:doc.id,activeId:active,question};
    const currentContext=target.docId===doc.id&&target.activeId===active;
    const existingTarget=threads.find(item=>item.id===target.activeId&&item.docId===target.docId);
    const targetQuestion=currentContext?question:target.question;
    const targetCitations=extras[target.activeId]||[];
-   const needsNewDraft=!!pending[target.activeId]||(!targetQuestion.trim()&&!targetCitations.length&&!!existingTarget?.messages.length);
+   const idBelongsToOtherDocument=threads.some(item=>item.id===target.activeId&&item.docId!==target.docId);
+   const needsNewDraft=idBelongsToOtherDocument||!!pending[target.activeId]||(!targetQuestion.trim()&&!targetCitations.length&&!!existingTarget?.messages.length);
    let id=target.activeId;
    if(needsNewDraft){
      id='draft-'+crypto.randomUUID();
-     setThreads(value=>[...value,{...selection,id,docId:target.docId,messages:[]}]);
+     setThreads(value=>[...value,{...screenshot,id,docId:target.docId,messages:[]}]);
      setQuestions(value=>({...value,[id]:''}));
      if(currentContext){setActive(id);setTab('discussions');}
    }else if(!existingTarget){
-     setThreads(value=>value.some(item=>item.id===id&&item.docId===target.docId)?value:[...value,{...selection,id,docId:target.docId,messages:[]}]);
-   }else if(!existingTarget.image&&!targetCitations.length&&!targetQuestion.trim()){
-     setThreads(value=>updateThread(value,id,item=>({...item,page:selection.page,image:selection.image,rect:selection.rect})));
+     setThreads(value=>value.some(item=>item.id===id&&item.docId===target.docId)?value:[...value,{...screenshot,id,docId:target.docId,messages:[]}]);
+     attempts.current.delete(id);
+     return true;
+   }else if(!existingTarget.image&&!existingTarget.text&&!targetCitations.length&&!targetQuestion.trim()){
+     setThreads(value=>updateThread(value,id,item=>({...item,page:screenshot.page,image:screenshot.image,rect:screenshot.rect})));
      setOmitImage(value=>({...value,[id]:false}));
      attempts.current.delete(id);
      return true;
    }
    if(needsNewDraft){
-     setThreads(value=>updateThread(value,id,item=>({...item,page:selection.page,image:selection.image,rect:selection.rect})));
+     setThreads(value=>updateThread(value,id,item=>({...item,page:screenshot.page,image:screenshot.image,rect:screenshot.rect})));
      attempts.current.delete(id);
      return true;
    }
-   return addCitation(id,selection);
+   if(targetCitations.length+(attachmentReads[id]??0)>=12)return false;
+   const imageNumber=(existingTarget?.image&&!omitImage[id]?1:0)+targetCitations.filter(item=>!!item.image).length+1;
+   return addCitation(id,{...screenshot,text:`截图 ${imageNumber}`});
  }
+ const beginCrop=useCallback(()=>{
+   const id=crypto.randomUUID();
+   cropTargets.current.set(id,{docId:doc.id,activeId:active,question});
+   return id;
+ },[doc.id,active,question]);
+ const updateCropPending=useCallback((isPending:boolean,id:string)=>{
+   if(isPending){setCropPending(true);return;}
+   cropTargets.current.delete(id);
+   setCropPending(cropTargets.current.size>0);
+ },[]);
 
  useEffect(()=>{
    let current=true;
@@ -401,7 +418,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  function select(s:Selection,action:'ask'|'add'|'save'='ask'){
    if(action==='save'){
      if(!s.text)return;
-     setInsert({id:Date.now(),text:['## '+doc.name+' · 第 '+s.page+' 页',noteSource(s.page),...s.text.split(/\r?\n/).map(line=>'> '+line)].join('\n\n')});
+     appendNote(['## '+doc.name+' · 第 '+s.page+' 页',noteSource(s.page),...s.text.split(/\r?\n/).map(line=>'> '+line)]);
      setTab('note');return;
    }
    if(action==='add'){
@@ -433,8 +450,10 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  }
  async function ensureSample(){if(savedDoc.current)return savedDoc.current;if(!samplePromise.current){samplePromise.current=(async()=>{const response=await fetch('/lesson.pdf');if(!response.ok)throw new Error('示例讲义未能载入，请上传自己的讲义。');const form=new FormData();form.append('file',new File([await response.blob()],sample.name,{type:'application/pdf'}));form.append('course',sample.course);const result=await request<{id:string}>('/docs',{method:'POST',body:form});savedDoc.current=result.id;setDocs(v=>[...v,{...sample,id:result.id}]);setThreads(v=>v.map(t=>t.docId==='sample'?{...t,docId:result.id}:t));setDocId(current=>current==='sample'?result.id:current);return result.id;})().catch(e=>{samplePromise.current=null;throw e;});}return samplePromise.current;}
  async function ask(value=question){
- if(!ready||!value.trim()||pending[thread.id]||attachmentReads[thread.id]||sending.current.has(thread.id))return;
+ if(!ready||cropPending||!value.trim()||pending[thread.id]||attachmentReads[thread.id]||sending.current.has(thread.id))return;
  const snapshot=thread, key=snapshot.id, q=value.trim();
+ const citationSnapshot=[...citations];
+ const imageSnapshot=primaryImage;
  const signature=modelSignature;
  const previous=attempts.current.get(key);
  const retry=previous?.question===q&&previous.signature===signature;
@@ -452,7 +471,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  if(!operation.body){
  const pages=requestedPages(q);
  const reader=lookup.current;
- const hasSelection=!!citations.length||!!primaryImage||!!(primaryText&&primaryText!=='按页提问');
+ const hasSelection=!!citationSnapshot.length||!!imageSnapshot||!!(primaryText&&primaryText!=='按页提问');
  const asksCurrent=/本页|当前页|这一?页/.test(q);
  const overview=!pages.length&&!asksCurrent&&isOverview(q)&&(!hasSelection||/全文|整份|整篇|整本|课件|讲义/.test(q));
  const needsCurrent=asksCurrent||(!hasSelection&&!snapshot.messages.length);
@@ -462,12 +481,12 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const extracts:Selection[]=[];for(const n of pages)extracts.push(await reader!.read(n));
  const outline=overview?await documentOverview(reader!):undefined;
  if(outline)extracts.push(...outline.images);
- const references=[...citations,...extracts];
+ const references=[...citationSnapshot,...extracts];
  context=[outline?.text,...references.map(s=>'第 '+s.page+' 页 · '+(s.text||'图片'))].filter(Boolean).join('\n').slice(0,39500);
  sourcePage=pages[0]??(hasSelection?snapshot.page:page);
  const pictures=references.flatMap(s=>s.image?[s.image]:[]);
- const attachment=await combineImages([...(primaryImage&&(pictures.length||gateway)?[primaryImage]:[]),...pictures]);
- if(personal&&!gateway&&!personalVision&&attachment&&(citations.some(s=>s.image)||extracts.some(s=>!s.text?.trim())))throw Error('请选用支持图片输入的模型。');
+ const attachment=await combineImages([...(imageSnapshot&&(pictures.length||gateway)?[imageSnapshot]:[]),...pictures]);
+ if(personal&&!gateway&&!personalVision&&attachment&&(citationSnapshot.some(s=>s.image)||extracts.some(s=>!s.text?.trim())))throw Error('请选用支持图片输入的模型。');
  visual=personal&&!gateway&&!personalVision?undefined:attachment;
  operation.body={requestId:operation.requestId,question:q,context,sourcePage,omitPrimaryText:!!omitPrimary[key],omitPrimaryImage:!!omitImage[key],attachment:visual,...(!freeQuestion&&{maxCredits:answerLimit}),...(personal?{source:'personal',revision:personal.revision,model:personalModel}:settings)};
  }
@@ -475,7 +494,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  if(key.startsWith('draft-')&&!operation.threadId){
    if(!operation.creation){
      const documentId=snapshot.docId==='sample'?await ensureSample():snapshot.docId;
-     operation.creation={requestId:operation.requestId,docId:documentId,page:snapshot.page,text:primaryText,unanchored:!primaryText&&!primaryImage,image:primaryImage,rect:primaryImage||(!snapshot.image&&primaryText)?snapshot.rect:undefined};
+     operation.creation={requestId:operation.requestId,docId:snapshot.docId==='sample'?documentId:snapshot.docId,page:snapshot.page,text:primaryText,unanchored:!primaryText&&!imageSnapshot,image:imageSnapshot,rect:imageSnapshot||(!snapshot.image&&primaryText)?snapshot.rect:undefined};
    }
    const created=await request<{id:string}>('/threads',json(operation.creation));
    operation.threadId=created.id;id=created.id;
@@ -528,7 +547,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
      setFailedAsks(v=>({...v,[id]:{question:q,signature,cap,sent:sentPaidAsk}}));
    }
    setQuestions(v=>({...v,[id]:v[id]||q}));
-   if(id!==key)setExtras(v=>({...v,[id]:citations}));
+   if(id!==key)setExtras(v=>({...v,[id]:citationSnapshot}));
    setErrors(v=>({...v,[id]:e instanceof Error?e.message:'发送失败，请重试。'}));
  }finally{
    sending.current.delete(key);sending.current.delete(id);
@@ -577,7 +596,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  }} onOpenMemory={openProjectMemory} onMoveDoc={chooseMove} threads={threads} onOpenDoc={openDocument} onImport={openImport} onSample={()=>openDocument(sample)}/>:<section className="hub-loading" role="status">{libraryError||'正在读取资料库…'}{libraryError&&<button onClick={()=>reloadLibrary(n=>n+1)}>重试</button>}{libraryError.includes('登录')&&<a href="/login">登录</a>}</section>}</div>
  <div className="desk" hidden={home} data-folded={collapsed}>
  <aside id="study-library" className={`library ${library?'is-open':''}`} aria-label="资料库"><div className="library-heading"><span>我的资料库</span><button className="icon-button mobile-only" aria-label="关闭资料库" onClick={()=>setLibrary(false)}><Icon name="close"/></button></div><Shelf docs={allDocs} current={doc.id} organize={organize} move={chooseMove} drop={dropped} remove={d=>setRemove({kind:'doc',id:d.id,name:d.name})} open={openDocument}/><button className="add-document" onClick={()=>openImport(doc.course)}><Icon name="plus" size={16}/>添加课程资料</button></aside>
- <DeskDivider side="left"/><section className="reader-column" aria-label="讲义阅读区"><div className="document-heading"><div><h1>{doc.name.replace(/\.(pdf|pptx)$/i,'')}</h1><span className="document-course" title={doc.course}>{doc.course}</span></div><span className="file-type">{doc.kind.toUpperCase()}</span></div><div className="reader-hint"><button className="mobile-only text-button" onClick={()=>setMobilePanel(true)}>页边讨论{items.length?` · ${items.length}`:''}</button></div><div className="reader-stage">{!home&&libraryLoaded&&<Reader lookup={lookup} key={doc.id} documentId={doc.id} navigation={readerRequest} url={doc.id==='sample'?'/lesson.pdf':`/api/study/docs/${doc.id}/file`} kind={doc.kind} page={page} onPage={next=>{setPage(next);try{localStorage.setItem('pagewise:page:'+doc.id,String(next))}catch{}}} onSelect={select} onDismiss={()=>{setThreads(v=>dismissSelection(v,active,currentPending,question));newQuestion();setMobilePanel(false);}} focusPage={thread?.page} focusRect={thread?.docId===doc.id&&!omitImage[active]?thread.rect:undefined} annotations={items.filter(item=>item.messages.length>0).map(item=>({id:item.id,page:item.page,label:discussionTitle(item)}))} onOpenAnnotation={(id,sourcePage)=>{const annotation=items.find(item=>item.id===id);if(annotation)openThread(annotation,sourcePage)}}/></div></section>
+  <DeskDivider side="left"/><section className="reader-column" aria-label="讲义阅读区"><div className="document-heading"><div><h1>{doc.name.replace(/\.(pdf|pptx)$/i,'')}</h1><span className="document-course" title={doc.course}>{doc.course}</span></div><span className="file-type">{doc.kind.toUpperCase()}</span></div><div className="reader-hint">{(croppedImageCount>0||cropPending)&&<button className="reader-draft-entry" type="button" aria-label={`问题草稿，${croppedImageCount} 张截图`} onClick={()=>{setTab('discussions');setMobilePanel(true);}}>问题草稿 · {croppedImageCount} 张截图{cropPending?' · 正在处理':''}</button>}<button className="mobile-only text-button" onClick={()=>setMobilePanel(true)}>页边讨论{items.length?` · ${items.length}`:''}</button></div><div className="reader-stage">{!home&&libraryLoaded&&<Reader lookup={lookup} key={doc.id} documentId={doc.id} navigation={readerRequest} url={doc.id==='sample'?'/lesson.pdf':`/api/study/docs/${doc.id}/file`} kind={doc.kind} page={page} onPage={next=>{setPage(next);try{localStorage.setItem('pagewise:page:'+doc.id,String(next))}catch{}}} onSelect={select} onCrop={captureCrop} onCropStart={beginCrop} onCropState={updateCropPending} onDismiss={()=>{setThreads(v=>dismissSelection(v,active,currentPending,question));newQuestion();setMobilePanel(false);}} focusPage={thread?.page} focusRect={thread?.docId===doc.id&&!omitImage[active]?thread.rect:undefined} annotations={items.filter(item=>item.messages.length>0).map(item=>({id:item.id,page:item.page,label:discussionTitle(item)}))} onOpenAnnotation={(id,sourcePage)=>{const annotation=items.find(item=>item.id===id);if(annotation)openThread(annotation,sourcePage)}}/>}</div></section>
  <DeskDivider/><aside id="discussion-panel" data-empty-question={!thread.messages.length&&!primaryImage&&!primaryTextVisible&&!citations.length&&!currentPending&&!errors[active]} className={`margin-panel ${mobilePanel?'is-open':''}`} aria-label="页边讨论"><div className="margin-header"><div className="panel-tabs"><button className={tab==='discussions'?'active':''} onClick={()=>{setTab('discussions');requestAnimationFrame(()=>document.querySelector<HTMLElement>('#discussion-panel .conversation')?.focus({preventScroll:true}));}}>页边讨论<span>{items.length}</span></button><button className={tab==='memory'?'active':''} onClick={()=>{setMemoryProject(doc.course);setTab('memory')}}>项目记忆</button><button className={tab==='note'?'active':''} onClick={()=>setTab('note')}>笔记</button></div><button className="icon-button mobile-only" aria-label="返回讲义" onClick={()=>setMobilePanel(false)}><Icon name="close"/></button></div>
  <Notebook visible={tab==='note'} inserts={inserts} onAppend={setAddedToNote}/>{tab==='note'?null:tab==='memory'?<ProjectMemory key={openProject} course={openProject} courses={projects} changeCourse={setMemoryProject}
    automatic={automaticMemory} toggleAutomatic={toggleAutomaticMemory} canAnalyze={memoryReady}
@@ -602,6 +621,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
    event.currentTarget.value='';
    void addImageAttachments(files);
  }}/></label>{((thread.text&&!omitPrimary[active]&&thread.text!=='按页提问')||primaryImage||citations.length>0)&&<div className="citation-list" aria-label="本次引用">
+  {(primaryImage||citations.some(item=>!!item.image))&&<div className="screenshot-attachments" aria-label="截图附件">{primaryImage&&<figure><img src={primaryImage} alt={`第 ${thread.page} 页截图`} /><figcaption>第 {thread.page} 页</figcaption></figure>}{citations.map((item,index)=>item.image?<figure key={index}><img src={item.image} alt={`第 ${item.page} 页截图`} /><figcaption>第 {item.page} 页</figcaption></figure>:null)}</div>}
  {thread.text&&!omitPrimary[active]&&thread.text!=='按页提问'&&<div className="citation-chip" title={thread.text}><button type="button" className="citation-locate" aria-label={`定位第 ${thread.page} 页：${thread.text}`} onClick={()=>{requestReaderPage(thread.page);setMobilePanel(false)}}><small>P{thread.page}</small><span>{thread.text}</span></button><button type="button" className="citation-remove" disabled={currentPending} aria-label={`移除引用：${thread.text}`} onClick={()=>setOmitPrimary(v=>({...v,[active]:true}))}>×</button></div>}
  {primaryImage&&<div className="citation-chip"><small>P{thread.page}</small><span>图片</span><button type="button" className="citation-remove" disabled={currentPending} onClick={removePrimaryImage} aria-label="移除引用：首次框选的图片">×</button></div>}
  {citations.map((c,i)=><div className="citation-chip" key={i} title={c.text||'图片'}><small>P{c.page}</small><span>{c.text||'图片'}</span><button type="button" className="citation-remove" disabled={currentPending} aria-label={`移除引用：${c.text||'图片'}`} onClick={()=>setExtras(v=>({...v,[active]:(v[active]||[]).filter((_,j)=>i!==j)}))}>×</button></div>)}</div>}</div>{latestInsert&&<div className="notebook-action-feedback"><span role="status">{addedToNote===latestInsert.id?'已加入学习笔记':'正在加入学习笔记…'}</span><button type="button" onClick={()=>{setInserts(previous=>previous.filter(item=>item.id>addedToNote));setTab('note')}} disabled={addedToNote!==latestInsert.id}>查看笔记</button></div>}<form className="composer" onSubmit={e=>{e.preventDefault();void ask();}}><div className="question-price" id="question-price" role="status">{priceLabel&&<span>{priceLabel}</span>}{!freeQuestion&&automaticMemory&&pricing&&<span>{automaticPriceLabel}</span>}<button type="button" className="question-account-link" onClick={()=>setAccount(true)}>积分账户</button>{!freeQuestion&&!!credits.error&&<button type="button" disabled={credits.loading} onClick={()=>void credits.refresh()}>重新读取</button>}{insufficientCredits&&<><strong>新提问的可用积分不足。保存学习笔记可获得积分，或改用 Magpie / 个人 API，站内扣分为 0.000。</strong><button type="button" onClick={()=>setTab('note')}>写笔记赚积分</button><button type="button" onClick={()=>document.querySelector<HTMLButtonElement>('.source-trigger')?.click()}>切换模型来源</button></>}{!freeQuestion&&credits.error?.includes('登录')&&<a href="/login">登录</a>}</div><label className="sr-only" htmlFor="question">向课件提问</label><textarea id="question" aria-describedby="question-price" onPaste={event=>{
@@ -620,7 +640,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
    const form=event.currentTarget.form;
    const send=form?.querySelector<HTMLButtonElement>('button[type="submit"]');
    if(send&&!send.disabled)form?.requestSubmit(send);
- }} value={question} onChange={e=>setQuestion(e.target.value)} placeholder={thread.messages.length?'继续追问，或换一种角度…':'输入问题，例如「第 3、5 页有什么联系？」或「梳理整份课件的大纲」'} rows={3}/><div className="composer-actions">{gateway?<MagpieModelPicker gateway={gateway} choose={model=>setConnection({...gateway,model})}/>:personal&&personalModel?<PersonalModelPicker profile={personal} model={personalModel} choose={model=>choosePersonal({model,revision:personal.revision})} image={!!primaryImage||citations.some(c=>!!c.image)}/>:<TutorControls value={settings} onChange={changeSettings} availability={availability}/>}<button title="发送问题" className="send-button" disabled={!question.trim()||currentPending||!!attachmentReads[active]||!ready||(creditBlocked&&!(replayQuestion&&failedAsk?.sent))} aria-describedby="question-price" aria-label="发送问题" type="submit"><Icon name="send" size={17}/></button></div></form></>}
+ }} value={question} onChange={e=>setQuestion(e.target.value)} placeholder={thread.messages.length?'继续追问，或换一种角度…':'输入问题，例如「第 3、5 页有什么联系？」或「梳理整份课件的大纲」'} rows={3}/><div className="composer-actions">{gateway?<MagpieModelPicker gateway={gateway} choose={model=>setConnection({...gateway,model})}/>:personal&&personalModel?<PersonalModelPicker profile={personal} model={personalModel} choose={model=>choosePersonal({model,revision:personal.revision})} image={!!primaryImage||citations.some(c=>!!c.image)}/>:<TutorControls value={settings} onChange={changeSettings} availability={availability}/>}<button title="发送问题" className="send-button" disabled={!question.trim()||currentPending||cropPending||!!attachmentReads[active]||!ready||(creditBlocked&&!(replayQuestion&&failedAsk?.sent))} aria-describedby="question-price" aria-label="发送问题" type="submit"><Icon name="send" size={17}/></button></div></form></>}
  </aside></div>
  <dialog className="move-document-dialog" ref={moveDialog} aria-labelledby="move-document-title"
    onCancel={event=>{if(moving)event.preventDefault();}} onClose={()=>setMovingDoc(null)}>

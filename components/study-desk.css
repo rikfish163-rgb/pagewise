@@ -20,6 +20,17 @@
 .workspace .reader-return:hover{background:var(--accent-soft)}
 @media(max-width:650px){.workspace .reader-return{top:auto;bottom:14px;left:50%;z-index:60;transform:translateX(-50%);white-space:nowrap}.reader-selection-actions{flex-wrap:wrap}.reader-selection-actions>span{flex-basis:100%}}
 .selected-passage .text-button{margin-left:auto}
+.conversation:has(.start-discussion) .selected-passage{display:none}
+.screenshot-attachments{display:flex;gap:8px;width:100%;overflow-x:auto;padding:5px 2px 9px;scrollbar-width:thin}
+.screenshot-attachments figure{position:relative;flex:0 0 88px;display:grid;grid-template-rows:64px auto;gap:4px;margin:0;padding:4px;border:1px solid var(--line);border-radius:7px;background:var(--paper)}
+.screenshot-attachments img{width:100%;height:64px;object-fit:contain;background:#fff;border-radius:4px}
+.screenshot-attachments figcaption{overflow:hidden;color:var(--muted);font-size:11px;text-align:center;text-overflow:ellipsis;white-space:nowrap}
+.reader-draft-entry{min-height:34px;padding:5px 10px;border:1px solid var(--line);border-radius:7px;background:var(--accent-soft);color:var(--accent-ink);font-size:.8rem}
+.workspace .reader-column>.reader-hint:has(.reader-draft-entry){display:flex;align-items:center;gap:8px;min-height:36px;padding:2px 8px}
+.workspace .reader-draft-entry:hover,.workspace .reader-draft-entry:focus-visible{background:var(--accent);color:var(--ink)}
+.reader-crop-feedback{position:absolute;z-index:12;max-width:min(280px,80%);padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-size:12px;box-shadow:0 5px 18px #201b1620;pointer-events:none;animation:selection-arrive 130ms ease-out}
+@media(max-width:650px){.screenshot-attachments figure{flex-basis:76px;grid-template-rows:54px auto}.screenshot-attachments img{height:54px}.workspace .reader-column>.reader-hint:has(.reader-draft-entry){justify-content:space-between}}
+@media(prefers-reduced-motion:reduce){.reader-crop-feedback{animation:none}}
 .selected-passage .image-remove{margin-left:6px;width:24px;min-height:24px;border-radius:4px;font-size:16px}
 .selected-passage .image-remove:hover{background:var(--accent-soft)}
 .workspace .document-heading{gap:12px}

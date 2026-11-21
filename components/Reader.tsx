@@ -7,9 +7,9 @@ import 'pdfjs-dist/web/pdf_viewer.css';
 import './reader.css';
 import {readProgress,recentReader,saveProgress,type ReadingProgress} from './reading-progress';
 
-export type ReaderSelection = { page: number; text?: string; image?: string; rect?: number[] };
+export type ReaderSelection = { page: number; text?: string; image?: string; rect?: number[]; captureId?:string };
 export type ReaderAnnotation = {id:string;page:number;label:string;rect?:number[]};
-export type Props = { documentId:string; navigation:{resume:boolean;revision:number}; lookup: React.RefObject<import('./study-context').PageReader|null>; url: string; kind: 'pdf'|'pptx'; page: number; onSelect: (s:ReaderSelection,action?:'ask'|'add'|'save')=>void; onCrop: (s:ReaderSelection)=>boolean; onCropState:(pending:boolean)=>void; onPage: (page:number)=>void; onDismiss:()=>void; focusRect?: number[]; focusPage?: number; annotations?:ReaderAnnotation[]; onOpenAnnotation?:(id:string,page:number)=>void };
+export type Props = { documentId:string; navigation:{resume:boolean;revision:number}; lookup: React.RefObject<import('./study-context').PageReader|null>; url: string; kind: 'pdf'|'pptx'; page: number; onSelect: (s:ReaderSelection,action?:'ask'|'add'|'save')=>void; onCrop: (s:ReaderSelection)=>boolean; onCropStart:()=>string; onCropState:(pending:boolean,captureId:string)=>void; onPage: (page:number)=>void; onDismiss:()=>void; focusRect?: number[]; focusPage?: number; annotations?:ReaderAnnotation[]; onOpenAnnotation?:(id:string,page:number)=>void };
 type PdfDocument = import('pdfjs-dist').PDFDocumentProxy;
 type Deck = { pres: Awaited<ReturnType<typeof import('@office-kit/pptx').loadPresentation>>; slides: ReturnType<typeof import('@office-kit/pptx').getSlides> };
 
@@ -53,7 +53,7 @@ function addSlideTextLayer(layer: HTMLDivElement) {
   });
 }
 
-export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,page,onPage,onSelect,onCrop,onCropState,onDismiss,focusRect,focusPage,annotations=[],onOpenAnnotation}: Props) {
+export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,page,onPage,onSelect,onCrop,onCropStart,onCropState,onDismiss,focusRect,focusPage,annotations=[],onOpenAnnotation}: Props) {
   const [pdf, setPdf] = useState<PdfDocument|null>(null);
   const [deck, setDeck] = useState<Deck|null>(null);
   const [count,setCount] = useState(0), [busy,setBusy] = useState(true), [error,setError] = useState('');
@@ -63,6 +63,7 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
   const queueSelection=(selection:ReaderSelection)=>setSelectionAction(selection);
   const [cropFeedback,setCropFeedback]=useState<{message:string;rect:number[];page:number}|null>(null);
   const feedbackTimer=useRef<number|null>(null);
+  useEffect(()=>()=>{if(feedbackTimer.current!==null)window.clearTimeout(feedbackTimer.current);},[]);
   const [revision,setRevision] = useState(0);
   const scroll=useRef<HTMLDivElement>(null);
   const stack=useRef<HTMLDivElement>(null);
@@ -282,7 +283,7 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
         <button type="submit" disabled={!count}>跳转</button>
       </form>
       <button aria-label="下一页" disabled={current>=count} onClick={()=>goToPage(current+1)}><ChevronRight size={17}/></button></div>
-      <details className="reader-thumbnails"><summary aria-label="打开页面缩略图">缩略图</summary><div role="listbox" aria-label="选择页面">{thumbnailPages.map(number=><button type="button" role="option" aria-selected={current===number} key={number} onClick={()=>goToPage(number)}><span>第 {number} 页</span><div className="reader-thumbnail"><ContinuousPage current={number} pdf={pdf} deck={deck} kind={kind} zoom={1} mode="text" onSelect={()=>{}} priority focusRect={undefined}/></div></button>)}</div></details>
+      <details className="reader-thumbnails"><summary aria-label="打开页面缩略图">缩略图</summary><div role="listbox" aria-label="选择页面">{thumbnailPages.map(number=><button type="button" role="option" aria-selected={current===number} key={number} onClick={()=>goToPage(number)}><span>第 {number} 页</span><div className="reader-thumbnail"><ContinuousPage current={number} pdf={pdf} deck={deck} kind={kind} zoom={1} mode="text" onSelect={()=>{}} onCrop={()=>false} onCropStart={()=>''} onCropState={()=>{}} feedback={null} priority focusRect={undefined}/></div></button>)}</div></details>
       <div><button aria-pressed={mode==='text'} onClick={()=>setMode('text')}><TextSelect size={16}/>选文字</button>
       <button aria-pressed={mode==='crop'} onClick={()=>setMode('crop')}><Scan size={16}/>框选图片</button>
       <button aria-pressed={layout==='continuous'} onClick={()=>setLayout('continuous')}>连续</button>
@@ -301,7 +302,7 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
           if(feedbackTimer.current!==null)window.clearTimeout(feedbackTimer.current);
           feedbackTimer.current=window.setTimeout(()=>setCropFeedback(null),2400);
           return added;
-        }} onCropState={onCropState} feedback={cropFeedback?.page===pageNumber?cropFeedback:null}
+        }} onCropStart={onCropStart} onCropState={onCropState} feedback={cropFeedback?.page===pageNumber?cropFeedback:null}
         priority={Math.abs(pageNumber-current)<=1}
         focusRect={(focusPage??current)===pageNumber?focusRect:undefined}
         annotations={annotations.filter(item=>item.page===pageNumber)} onOpenAnnotation={onOpenAnnotation}/></div>)}</div>
@@ -316,11 +317,11 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
 }
 
 type ContinuousPageProps=Pick<Props,'kind'|'onSelect'|'focusRect'|'annotations'|'onOpenAnnotation'> & {
-  onCrop:(selection:ReaderSelection)=>boolean;onCropState:(pending:boolean)=>void;feedback:{message:string;rect:number[];page:number}|null;
+  onCrop:(selection:ReaderSelection)=>boolean;onCropStart:()=>string;onCropState:(pending:boolean,captureId:string)=>void;feedback:{message:string;rect:number[];page:number}|null;
   current:number;zoom:number;mode:'text'|'crop';pdf:PdfDocument|null;deck:Deck|null;priority:boolean;
 };
 
-function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,onSelect,onCrop,onCropState,feedback,focusRect,annotations=[],onOpenAnnotation}:ContinuousPageProps){
+function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,onSelect,onCrop,onCropStart,onCropState,feedback,focusRect,annotations=[],onOpenAnnotation}:ContinuousPageProps){
   const [busy,setBusy]=useState(true),[error,setError]=useState('');
   const [ratio,setRatio]=useState(kind==='pdf'?1.414:16/9);
   const [visible,setVisible]=useState(false);
@@ -328,6 +329,7 @@ function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,onSelect,onCro
   const [drag,setDrag]=useState<Rect|null>(null);
   const surface=useRef<HTMLDivElement>(null),canvas=useRef<HTMLCanvasElement>(null),text=useRef<HTMLDivElement>(null);
   const start=useRef<number[]|null>(null),svg=useRef(''),rendered=useRef(0);
+  const cropId=useRef<string|null>(null);
   const gesture=useRef(0),cancelled=useRef(false);
   useEffect(()=>{
     const element=surface.current;
@@ -340,7 +342,20 @@ function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,onSelect,onCro
   useEffect(()=>{
     if(mode==='crop')return;
     gesture.current++;cancelled.current=true;start.current=null;
-  },[mode]);
+    if(cropId.current){onCropState(false,cropId.current);cropId.current=null;}
+  },[mode,onCropState]);
+  useEffect(()=>{
+    function cancelGesture(event:KeyboardEvent){
+      if(event.key!=='Escape'||!start.current)return;
+      start.current=null;setDrag(null);
+      if(cropId.current){onCropState(false,cropId.current);cropId.current=null;}
+    }
+    document.addEventListener('keydown',cancelGesture);
+    return ()=>{
+      document.removeEventListener('keydown',cancelGesture);
+      if(cropId.current){onCropState(false,cropId.current);cropId.current=null;}
+    };
+  },[onCropState]);
   useEffect(()=> {
     if(!nearby||!surface.current) return;
     const resize = new ResizeObserver(()=> {
@@ -398,7 +413,7 @@ function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,onSelect,onCro
     return ()=>{stopped=true;task?.cancel();};
   },[pdf,deck,current,nearby]);
 
-  async function crop(rect:Rect) {
+  async function crop(rect:Rect,captureId:string) {
     const token=gesture.current;
     try {
       if(rendered.current!==current) return;
@@ -413,19 +428,19 @@ function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,onSelect,onCro
       if(w<12||h<12){setError('选区太小，请重新框选更大的区域。');return;}
       const output=document.createElement('canvas');
       output.width=w;output.height=h;output.getContext('2d')!.drawImage(source,x,y,w,h,0,0,w,h);
-      if(token===gesture.current) onCrop({page:selectedPage,image:output.toDataURL('image/png'),rect});
+      if(token===gesture.current) onCrop({page:selectedPage,image:output.toDataURL('image/png'),rect,captureId});
     } catch {setError('选区图片生成失败，请重新框选或将文档导出为 PDF 后重试。');}
-    finally {onCropState(false);}
+    finally {onCropState(false,captureId);}
   }
 
   const highlight=(mode==='crop'?drag:null)??focusRect;
   return <div ref={surface} data-page={current} className={`reader-page ${kind==='pdf'?'reader-pdf':'reader-pptx'} ${mode==='crop'?'reader-cropping':''}`} style={{width:`${zoom*100}%`,aspectRatio:ratio}}
-        onPointerDown={e=>{cancelled.current=false;gesture.current++;if(mode==='crop' && nearby && !busy){onCropState(true);start.current=[e.clientX,e.clientY];e.currentTarget.setPointerCapture(e.pointerId);e.preventDefault();}}}
+        onPointerDown={e=>{cancelled.current=false;gesture.current++;if(mode==='crop' && nearby && !busy){cropId.current=onCropStart();onCropState(true,cropId.current);start.current=[e.clientX,e.clientY];e.currentTarget.setPointerCapture(e.pointerId);e.preventDefault();}}}
         onPointerMove={e=>{if(start.current) setDrag(normalizedRect(start.current,[e.clientX,e.clientY],e.currentTarget.getBoundingClientRect()));}}
-        onPointerCancel={()=>{if(start.current)onCropState(false);start.current=null;setDrag(null);}}
+        onPointerCancel={()=>{if(cropId.current)onCropState(false,cropId.current);cropId.current=null;start.current=null;setDrag(null);}}
         onPointerUp={e=>{
           if(cancelled.current){window.getSelection()?.removeAllRanges();return;}
-          if(start.current) {const rect=normalizedRect(start.current,[e.clientX,e.clientY],e.currentTarget.getBoundingClientRect());start.current=null;setDrag(null);if(rect) void crop(rect);else onCropState(false);return;}
+          if(start.current) {const rect=normalizedRect(start.current,[e.clientX,e.clientY],e.currentTarget.getBoundingClientRect());const captureId=cropId.current;start.current=null;cropId.current=null;setDrag(null);if(rect&&captureId) void crop(rect,captureId);else if(captureId)onCropState(false,captureId);return;}
           if(mode!=='text'||busy||!nearby)return;
           const selected=window.getSelection();if(!selected?.rangeCount || selected.isCollapsed)return;
           const range=selected.getRangeAt(0);if(!surface.current?.contains(range.commonAncestorContainer))return;
