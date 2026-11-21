@@ -1,6 +1,7 @@
 'use client';
 import {useEffect,useMemo,useRef,useState,type CSSProperties} from 'react';
-import { Bold, Check, ChevronLeft, ChevronRight, Ellipsis, Eye, FileText, Highlighter, List, Maximize2, PencilLine, Sigma, SpellCheck, SplitSquareVertical } from 'lucide-react';
+import { Bold, Check, ChevronDown, ChevronLeft, ChevronRight, Ellipsis, Eye, FileText, Highlighter, List, Maximize2, PencilLine, Sigma, SpellCheck, SplitSquareVertical } from 'lucide-react';
+import {DropdownMenu} from 'radix-ui';
 import {notebookNavigation} from '../lib/markdown';
 import './notebook.css';
 import MarkdownAnswer from './MarkdownAnswer';
@@ -25,7 +26,7 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
  const actions=useRef<HTMLDivElement>(null),importFile=useRef<HTMLInputElement>(null),stage=useRef<HTMLDialogElement>(null);
  const [expanded,setExpanded]=useState(false);
  const {pages,headings}=useMemo(()=>preview?notebookNavigation(body):{pages:[],headings:[]},[body,preview]);
- const previewHost=useRef<HTMLDivElement>(null);
+ const editor=useRef<HTMLDivElement>(null),previewHost=useRef<HTMLDivElement>(null);
  const index=Math.min(page,Math.max(0,pages.length-1));
  useEffect(()=>{
    try{
@@ -67,18 +68,34 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
    const content=slide?pages[index]||'':body;
    return <div key={slide?index:'document'} className={slide?'nb-slide':'nb-flow'}>{content.trim()?<MarkdownAnswer content={content}/>:<p className="nb-empty">在「编辑」中写下第一段笔记。</p>}</div>;
  }
- function outline(){
-   if(headings.length<2)return null;
-   return <select aria-label="笔记目录" value="" onChange={event=>{
-     const at=Number(event.target.value),heading=headings[at];
-     if(!heading)return;
-     if(slide)setPage(heading.slide);
-     requestAnimationFrame(()=>{
-       const host=stage.current?.open?stage.current:previewHost.current;
-       const target=host?.querySelectorAll<HTMLElement>('.markdown-answer :is(h1,h2,h3,h4,h5,h6)')[slide?heading.position:at];
-       target?.scrollIntoView({block:'nearest'});
-     });
-   }}><option value="" disabled>目录 · {headings.length}</option>{headings.map((heading,i)=><option value={i} key={i}>{'　'.repeat(Math.max(0,heading.level-1))}{heading.text}</option>)}</select>;
+ function outline(inDialog=false){
+   if(!headings.length)return null;
+   return <DropdownMenu.Root modal={false}>
+     <DropdownMenu.Trigger className="nb-outline-trigger" aria-label="笔记目录">
+       目录<ChevronDown size={14} aria-hidden="true"/>
+     </DropdownMenu.Trigger>
+     <DropdownMenu.Portal container={inDialog?stage.current:undefined}>
+       <DropdownMenu.Content className="nb-outline-menu" align="end" sideOffset={4} collisionPadding={6}
+         collisionBoundary={inDialog?stage.current:editor.current}>
+         {headings.map((heading,headingIndex)=><DropdownMenu.Item
+           key={headingIndex}
+           className="nb-outline-item"
+           textValue={heading.text}
+           title={heading.text}
+           style={{'--heading-indent':Math.min(heading.level-1,3)*10+'px'} as CSSProperties}
+           onSelect={()=>{
+             if(slide)setPage(heading.slide);
+             requestAnimationFrame(()=>{
+               const host=inDialog?stage.current:previewHost.current;
+               const target=host?.querySelectorAll<HTMLElement>('.markdown-answer :is(h1,h2,h3,h4,h5,h6)')[slide?heading.position:headingIndex];
+               target?.scrollIntoView({block:'nearest'});
+             });
+           }}>
+           <span>{heading.text}</span>
+         </DropdownMenu.Item>)}
+       </DropdownMenu.Content>
+     </DropdownMenu.Portal>
+   </DropdownMenu.Root>;
  }
  function navigation(){
    return <div className="nb-pagination"><button type="button" aria-label="上一张" disabled={index===0} onClick={()=>setPage(index-1)}><ChevronLeft size={16}/></button><span>{index+1} / {pages.length}</span><button type="button" aria-label="下一张" disabled={index+1>=pages.length} onClick={()=>setPage(index+1)}><ChevronRight size={16}/></button></div>;
@@ -93,7 +110,7 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
        <input hidden ref={importFile} type="file" accept=".md,.markdown,text/markdown" onChange={async e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;if(f.size>750000){setStatus('文件过大');return}try{const imported=await f.text();setBody(v=>[v,imported].filter(Boolean).join('\n\n'));setPreview(false)}catch{setStatus('文件读取失败')}}}/>
      </div>
    </header>
-   <div className="nb-editor">
+   <div className="nb-editor" ref={editor}>
      <div className="nb-modes" role="group" aria-label="笔记视图">
        <button aria-pressed={!preview} onClick={()=>setPreview(false)}><PencilLine size={15}/>编辑</button>
        <button aria-pressed={preview} onClick={()=>setPreview(true)}><Eye size={16}/>预览</button>
@@ -113,6 +130,6 @@ export default function Notebook({visible,insert}:{visible:boolean;insert:{text:
        <textarea ref={area} disabled={revision<0} aria-label="Markdown 学习笔记" value={body} onChange={e=>setBody(e.target.value)} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='b'){e.preventDefault();wrap('**','**')}}} placeholder="写下你的笔记…"/>}
    </div>
    <footer className="nb-status"><span role="status">{status==='已同步'&&<Check size={13}/>} {status}</span><span>{body.length.toLocaleString()} 字符</span></footer>
-   <dialog ref={stage} className="nb-dialog" onClose={()=>setExpanded(false)}><header><strong>学习笔记</strong>{outline()}{slide&&navigation()}<button aria-label="关闭放大预览" onClick={()=>stage.current?.close()}>关闭</button></header>{expanded&&<div className={'nb-preview'+(slide?' paper-stage':'')}>{previewContent()}</div>}</dialog>
+   <dialog ref={stage} className="nb-dialog" onClose={()=>setExpanded(false)}><header><strong>学习笔记</strong>{expanded&&outline(true)}{slide&&navigation()}<button aria-label="关闭放大预览" onClick={()=>stage.current?.close()}>关闭</button></header>{expanded&&<div className={'nb-preview'+(slide?' paper-stage':'')}>{previewContent()}</div>}</dialog>
  </section>
 }
