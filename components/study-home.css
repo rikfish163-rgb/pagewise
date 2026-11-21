@@ -6,6 +6,32 @@
 
 .study-home .sh-resume-button:hover{background:var(--accent-hover);color:var(--ink)}
 
+.study-home .sh-main{padding-top:28px;padding-bottom:40px}
+.study-home .sh-header{margin-bottom:14px}
+.study-home .sh-resume{min-height:0;padding:15px 20px;margin-bottom:20px}
+.study-home .sh-resume-label{margin-bottom:5px}
+.study-home .sh-resume h2{font:500 21px/1.4 var(--font-serif)}
+.study-home .sh-resume-date{margin-top:3px}
+.study-home .sh-resume-button{margin-top:8px}
+.study-home .sh-documents{margin-top:17px}
+.study-home .sh-documents>h2{margin-bottom:5px}
+.study-home .sh-document{min-height:64px;padding:11px 4px;gap:12px}
+.study-home .sh-document-copy strong{font:500 16px/1.5 var(--font-serif)}
+.study-home .sh-material-row:focus-within{background:var(--paper)}
+.study-home .sh-document:hover{background:transparent}
+.study-home .sh-material-row:hover .sh-document-copy strong{color:var(--accent-ink)}
+.study-home .sh-document:focus-visible{outline-offset:-2px}
+.study-home .sh-search{background:var(--paper)}
+.study-home .sh-material-row{flex-wrap:wrap}
+.study-home .sh-search-matches{width:100%;padding:0 4px 8px 54px;color:var(--muted);font-size:12px}
+.study-home .sh-search-matches summary{width:max-content;min-height:30px;padding:4px 8px;cursor:pointer}
+.study-home .sh-search-matches>div{display:grid;gap:2px;padding:4px 0}
+.study-home .sh-search-matches>div>button{display:flex;justify-content:space-between;gap:12px;min-width:0;padding:7px 9px;border-left:1px solid var(--line);text-align:left}
+.study-home .sh-search-matches>div>button:hover{background:var(--paper)}
+.study-home .sh-search-matches>div>button span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.study-home .sh-search-matches>div>button small{flex:none;color:var(--muted)}
+@media(min-width:701px) and (max-height:800px){.study-home .sh-main{padding-top:20px}.study-home .sh-resume{padding-block:11px}.study-home .sh-document{min-height:56px;padding-block:8px}}
+
 /* 首页把空间优先留给最近阅读的资料。 */
 .study-home .sh-header{margin-bottom:20px}
 .study-home .sh-resume{min-height:0;padding:17px 22px;margin-bottom:22px;align-items:center}

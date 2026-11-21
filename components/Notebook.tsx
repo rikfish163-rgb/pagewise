@@ -1,10 +1,11 @@
 'use client';
-import {useEffect,useMemo,useRef,useState,type CSSProperties,type KeyboardEvent as ReactKeyboardEvent} from 'react';
+import {useCallback,useEffect,useMemo,useRef,useState,type CSSProperties,type KeyboardEvent as ReactKeyboardEvent} from 'react';
 import { Bold, Check, ChevronDown, ChevronLeft, ChevronRight, Ellipsis, Eye, FileText, Highlighter, List, Maximize2, PencilLine, Sigma, SpellCheck, SplitSquareVertical } from 'lucide-react';
 import {DropdownMenu} from 'radix-ui';
 import {notebookNavigation} from '../lib/markdown';
 import './notebook.css';
 import MarkdownAnswer from './MarkdownAnswer';
+import type {LucideIcon} from 'lucide-react';
 
 const fontFamilies: Record<string,string> = {
  '系统黑体': 'system-ui, "Microsoft YaHei", "PingFang SC", sans-serif',
@@ -16,6 +17,10 @@ const preferencesKey='pagewise:note-typography:v1';
 type Layout='continuous'|'standard'|'wide';
 type Preferences={font:string;size:number;layout:Layout;spacing?:string};
 const defaults:Preferences={font:'系统黑体',size:12,layout:'continuous'};
+
+function FormatTool({label,Icon,onAction}:{label:string;Icon:LucideIcon;onAction:()=>void}){
+ return <button type="button" title={label} aria-label={label} onMouseDown={event=>event.preventDefault()} onClick={onAction}><Icon size={15} strokeWidth={1.7}/></button>;
+}
 
 function scrollPreview(event:ReactKeyboardEvent<HTMLDivElement>){
  if(event.key!=='ArrowDown'&&event.key!=='ArrowUp')return;
@@ -37,19 +42,24 @@ export default function Notebook({visible,inserts,onAppend}:{visible:boolean;ins
  const [page,setPage]=useState(0);
  const [menu,setMenu]=useState(false);
  const actions=useRef<HTMLDivElement>(null),importFile=useRef<HTMLInputElement>(null),stage=useRef<HTMLDialogElement>(null);
+ const [dialogPortal,setDialogPortal]=useState<HTMLElement|null>(null);
  const [expanded,setExpanded]=useState(false);
  const {pages,headings}=useMemo(()=>preview?notebookNavigation(body):{pages:[],headings:[]},[body,preview]);
  const editor=useRef<HTMLDivElement>(null),previewHost=useRef<HTMLDivElement>(null),expandedPreviewHost=useRef<HTMLDivElement>(null);
- const outlineTarget=useRef<number|null>(null);
+ const [outlineTarget,setOutlineTarget]=useState<number|null>(null);
+ const [previewHostElement,setPreviewHostElement]=useState<HTMLDivElement|null>(null);
+ const [expandedPreviewElement,setExpandedPreviewElement]=useState<HTMLDivElement|null>(null);
  useEffect(()=>{
    if(expanded)expandedPreviewHost.current?.focus({preventScroll:true});
  },[expanded]);
  const index=Math.min(page,Math.max(0,pages.length-1));
  useEffect(()=>{
+   let frame=0;
    try{
      const saved=JSON.parse(localStorage.getItem(preferencesKey)||'null');
-     if(saved && typeof saved.font==='string' && saved.font.length<=100 && Number.isInteger(saved.size)&&saved.size>=8&&saved.size<=72&&['continuous','standard','wide'].includes(saved.layout))setPrefs(saved);
+     if(saved && typeof saved.font==='string' && saved.font.length<=100 && Number.isInteger(saved.size)&&saved.size>=8&&saved.size<=72&&['continuous','standard','wide'].includes(saved.layout))frame=requestAnimationFrame(()=>setPrefs(saved));
    }catch{}
+   return()=>cancelAnimationFrame(frame);
  },[]);
  function preference(change:Partial<Preferences>){
    const next={...prefs,...change};setPrefs(next);
@@ -93,28 +103,28 @@ export default function Notebook({visible,inserts,onAppend}:{visible:boolean;ins
    const content=slide?pages[index]||'':body;
    return <div key={slide?index:'document'} className={slide?'nb-slide':'nb-flow'}>{content.trim()?<MarkdownAnswer content={content}/>:<p className="nb-empty">在「编辑」中写下第一段笔记。</p>}</div>;
  }
+ const onOutlineClose=useCallback((event:Event,inDialog:boolean)=>{
+   const headingIndex=outlineTarget;
+   setOutlineTarget(null);
+   const host=inDialog?expandedPreviewElement:previewHostElement;
+   if(headingIndex===null||!host)return;
+   const position=slide?headings[headingIndex]?.position:headingIndex;
+   event.preventDefault();
+   host.focus({preventScroll:true});
+   if(position!==undefined){
+     const headingsInPreview=host.querySelectorAll<HTMLElement>('.markdown-answer :is(h1,h2,h3,h4,h5,h6)');
+     headingsInPreview[position]?.scrollIntoView({block:'nearest'});
+   }
+ },[expandedPreviewElement,headings,outlineTarget,previewHostElement,slide]);
  function outline(inDialog=false){
    if(!headings.length)return null;
    return <DropdownMenu.Root modal={false}>
      <DropdownMenu.Trigger className="nb-outline-trigger" aria-label="笔记目录">
        目录<ChevronDown size={14} aria-hidden="true"/>
      </DropdownMenu.Trigger>
-     <DropdownMenu.Portal container={inDialog?stage.current:undefined}>
+     <DropdownMenu.Portal container={inDialog?dialogPortal:undefined}>
        <DropdownMenu.Content className="nb-outline-menu" align="end" sideOffset={4} collisionPadding={6}
-         collisionBoundary={inDialog?stage.current:editor.current}
-         onCloseAutoFocus={event=>{
-           const headingIndex=outlineTarget.current;
-           outlineTarget.current=null;
-           const host=(inDialog?expandedPreviewHost:previewHost).current;
-           if(headingIndex===null||!host)return;
-           const position=slide?headings[headingIndex]?.position:headingIndex;
-           event.preventDefault();
-           host.focus({preventScroll:true});
-           if(position!==undefined){
-             const headingsInPreview=host.querySelectorAll<HTMLElement>('.markdown-answer :is(h1,h2,h3,h4,h5,h6)');
-             headingsInPreview[position]?.scrollIntoView({block:'nearest'});
-           }
-         }}>
+         onCloseAutoFocus={event=>onOutlineClose(event,inDialog)}>
          {headings.map((heading,headingIndex)=><DropdownMenu.Item
            key={headingIndex}
            className="nb-outline-item"
@@ -122,7 +132,7 @@ export default function Notebook({visible,inserts,onAppend}:{visible:boolean;ins
            title={heading.text}
            style={{'--heading-indent':Math.min(heading.level-1,3)*10+'px'} as CSSProperties}
            onSelect={()=>{
-             outlineTarget.current=headingIndex;
+             setOutlineTarget(headingIndex);
              if(slide)setPage(heading.slide);
            }}>
            <span>{heading.text}</span>
@@ -133,9 +143,6 @@ export default function Notebook({visible,inserts,onAppend}:{visible:boolean;ins
  }
  function navigation(){
    return <div className="nb-pagination"><button type="button" aria-label="上一张" disabled={index===0} onClick={()=>setPage(index-1)}><ChevronLeft size={16}/></button><span>{index+1} / {pages.length}</span><button type="button" aria-label="下一张" disabled={index+1>=pages.length} onClick={()=>setPage(index+1)}><ChevronRight size={16}/></button></div>;
- }
- function tool(label:string,Icon:typeof Bold,act:()=>void){
-   return <button type="button" title={label} aria-label={label} onMouseDown={e=>e.preventDefault()} onClick={act}><Icon size={15} strokeWidth={1.7}/></button>;
  }
  return <section className="nb" hidden={!visible} style={style} aria-label="我的学习笔记">
    <header className="nb-header"><div className="nb-title"><FileText size={17} aria-hidden="true"/><strong>学习笔记</strong></div>
@@ -161,14 +168,14 @@ export default function Notebook({visible,inserts,onAppend}:{visible:boolean;ins
      </div></details>
      {preview?<div className="nb-layout"><label>版式 <select value={prefs.layout} aria-label="预览版式" onChange={e=>{setPage(0);preference({layout:e.target.value as Layout})}}><option value="continuous">连续文档</option><option value="standard">标准幻灯片 · 4:3</option><option value="wide">宽屏幻灯片 · 16:9</option></select></label>{outline()}{slide&&navigation()}</div>:<fieldset className="nb-format" aria-label="Markdown 格式" disabled={revision<0}>
        <select aria-label="插入标题" value="" onChange={e=>wrap('#'.repeat(Number(e.target.value))+' ','',true)}><option value="" disabled>标题</option>{[1,2,3,4,5,6].map(n=><option value={n} key={n}>H{n}</option>)}</select>
-       {tool('加粗',Bold,()=>wrap('**','**'))}{tool('高亮',Highlighter,()=>wrap('==','=='))}{tool('公式',Sigma,()=>wrap('$','$'))}{tool('列表',List,()=>wrap('- ','',true))}{tool('插入幻灯片分页线',SplitSquareVertical,()=>wrap('\n\n---\n\n',''))}{tool('规范排版',SpellCheck,normalize)}
+       <FormatTool label="加粗" Icon={Bold} onAction={()=>wrap('**','**')}/><FormatTool label="高亮" Icon={Highlighter} onAction={()=>wrap('==','==')}/><FormatTool label="公式" Icon={Sigma} onAction={()=>wrap('$','$')}/><FormatTool label="列表" Icon={List} onAction={()=>wrap('- ','',true)}/><FormatTool label="插入幻灯片分页线" Icon={SplitSquareVertical} onAction={()=>wrap('\n\n---\n\n','')}/><FormatTool label="规范排版" Icon={SpellCheck} onAction={normalize}/>
      </fieldset>}
-     {preview?<div ref={previewHost} className={'nb-preview'+(slide?' paper-stage':'')} tabIndex={0}
+     {preview?<div ref={node=>{previewHost.current=node;setPreviewHostElement(node)}} className={'nb-preview'+(slide?' paper-stage':'')} tabIndex={0}
        role="region" aria-label="笔记预览" onKeyDown={scrollPreview}>{previewContent()}</div>:
        <textarea ref={area} disabled={revision<0} aria-label="Markdown 学习笔记" value={body} onChange={e=>setBody(e.target.value)} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='b'){e.preventDefault();wrap('**','**')}}} placeholder="写下你的笔记…"/>}
    </div>
    <footer className="nb-status"><span role="status">{status==='已同步'&&<Check size={13}/>} {status}</span><span>{body.length.toLocaleString()} 字符</span></footer>
-   <dialog ref={stage} className="nb-dialog" onClose={()=>setExpanded(false)}><header><strong>学习笔记</strong>{expanded&&outline(true)}{slide&&navigation()}<button aria-label="关闭放大预览" onClick={()=>stage.current?.close()}>关闭</button></header>{expanded&&<div ref={expandedPreviewHost} className={'nb-preview'+(slide?' paper-stage':'')}
+   <dialog ref={node=>{stage.current=node;if(node)setDialogPortal(node)}} className="nb-dialog" onClose={()=>setExpanded(false)}><header><strong>学习笔记</strong>{expanded&&outline(true)}{slide&&navigation()}<button aria-label="关闭放大预览" onClick={()=>stage.current?.close()}>关闭</button></header>{expanded&&<div ref={node=>{expandedPreviewHost.current=node;setExpandedPreviewElement(node)}} className={'nb-preview'+(slide?' paper-stage':'')}
      tabIndex={0} role="region" aria-label="放大的笔记预览" onKeyDown={scrollPreview}>{previewContent()}</div>}</dialog>
  </section>
 }

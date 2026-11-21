@@ -38,7 +38,7 @@
 .reader-thumbnail .reader-page{min-width:0;box-shadow:none}
 .reader-page-annotation{position:absolute;z-index:9;max-width:min(200px,45%);min-height:32px;padding:5px 9px;overflow:hidden;border:1px solid var(--line);border-radius:7px;background:var(--accent-soft);color:var(--accent-ink);font-size:12px;text-align:left;text-overflow:ellipsis;white-space:nowrap;box-shadow:0 3px 12px #201b1610}
 .reader-page-annotation:hover,.reader-page-annotation:focus-visible{background:var(--accent);color:var(--ink)}
-@media(max-width:760px){.reader-page-annotation{max-width:150px;min-height:34px}}
+@media(max-width:760px){.reader-page-annotation{display:none}.reader-annotation-list{display:block}}
 .slideLayer{position:relative;container-type:inline-size}.reader-page .slideLayer svg,.reader-page .slideLayer svg text{user-select:none}.pptx-text-overlay{position:absolute;inset:0;overflow:hidden}.pptx-text-overlay span{position:absolute;white-space:pre;color:transparent;transform-origin:0 0;cursor:text;user-select:text}.pptx-text-overlay span::selection{background:#da775655}.reader-cropping .pptx-text-overlay{pointer-events:none;user-select:none}
 .reader-jump{display:flex;align-items:center;gap:.32rem;white-space:nowrap}
 .reader-jump input{width:3.4em;text-align:center;border:1px solid var(--line);border-radius:4px;background:var(--paper);padding:.25rem .2rem}

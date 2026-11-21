@@ -90,10 +90,19 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
   const activeProject = project !== null && projects.includes(project) ? project : null;
   const search = query.trim().toLocaleLowerCase();
   const ordered = [...docs].sort((a, b) => (b.visited || 0) - (a.visited || 0) || a.name.localeCompare(b.name, 'zh-CN'));
-  const recent = ordered.find(doc => !!doc.visited);
-  const recentPage=useSyncExternalStore(subscribeReadingProgress,()=>recent?readProgress(recent.id)?.page??null:null,()=>null);
+  const checkpointState=useSyncExternalStore(subscribeReadingProgress,()=>ordered.flatMap(doc=>{
+    const progress=readProgress(doc.id);
+    return progress?[`${doc.id}:${progress.page}`]:[];
+  }).join('|'),()=> '');
+  const checkpoints=new Map(checkpointState.split('|').filter(Boolean).map(entry=>{
+    const separator=entry.lastIndexOf(':');
+    return [entry.slice(0,separator),Number(entry.slice(separator+1))] as const;
+  }));
+  const recent=ordered.find(doc=>checkpoints.has(doc.id));
+  const recentPage=recent?checkpoints.get(recent.id):null;
   const visible = ordered.filter(doc => (activeProject === null || doc.course === activeProject) && (!search ||
     `${doc.name} ${doc.course}`.toLocaleLowerCase().includes(search) || threads.some(thread => thread.docId === doc.id && thread.messages.some(message => message.role === 'user' && message.content.toLocaleLowerCase().includes(search)))));
+  const recentDocs=visible.filter(doc=>!!doc.visited).slice(0,5);
   const sortedVisible = sort === 'name'
     ? [...visible].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }) || a.id.localeCompare(b.id))
     : visible;
@@ -168,13 +177,27 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
       {loading ? <div className="sh-loading" role="status"><BookOpen size={26} /><p>正在载入你的学习项目…</p></div> : !projects.length ? !error && <div className="sh-empty">
         <span className="sh-empty-icon"><BookOpen size={36} strokeWidth={1.3} /></span><h2>还没有学习资料</h2><p>从右上角导入 PDF 或 PPTX，按课程建立项目。</p><small>单份不超过 20 MiB</small>{onSample && <button type="button" className="sh-sample" onClick={onSample}>打开示例讲义<ArrowRight size={16} /></button>}
       </div> : <>
-        {recent && activeProject === null && !search && <section className="sh-resume" aria-labelledby="sh-resume-title"><div className="sh-resume-body"><span className="sh-resume-label"><History size={15} />继续学习</span><p className="sh-resume-course">{recent.course}</p><h2 id="sh-resume-title">{title(recent)}</h2><p><span className="sh-resume-date">{recentPage ? `上次读到第 ${recentPage} 页` : `上次打开 ${dateLabel(recent.visited)}`}</span></p><button type="button" onClick={() => onOpenDoc(recent)} className="sh-resume-button">继续阅读<ArrowRight size={17} /></button></div><div className="sh-page-motif" aria-hidden="true"><FileText size={42} strokeWidth={1} /><span>{recent.kind.toUpperCase()}</span></div></section>}
+        {recent && activeProject === null && !search && <section className="sh-resume" aria-labelledby="sh-resume-title"><div className="sh-resume-body"><span className="sh-resume-label"><History size={15} />继续学习</span><p className="sh-resume-course">{recent.course}</p><h2 id="sh-resume-title">{title(recent)}</h2><p><span className="sh-resume-date">上次读到第 {recentPage} 页</span></p><button type="button" onClick={() => onOpenDoc(recent)} className="sh-resume-button">继续阅读<ArrowRight size={17} /></button></div><div className="sh-page-motif" aria-hidden="true"><FileText size={42} strokeWidth={1} /><span>{recent.kind.toUpperCase()}</span></div></section>}
         <div className="sh-section-heading"><div><h2>{activeProject === null ? '我的项目' : '项目资料'}</h2><span>{activeProject === null ? `${projects.length} 个项目` : `${docs.filter(doc => doc.course === activeProject).length} 份资料`}</span></div><div className="sh-tools">{activeProject&&onOpenMemory&&<button type="button" className="sh-memory-link" onClick={()=>onOpenMemory(activeProject)}>复习主题</button>}<label className="sh-search" htmlFor={searchId}><Search size={17} /><span className="sh-sr-only">搜索项目、资料或提问</span><input id={searchId} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索项目、资料或提问" />{query && <button type="button" aria-label="清除搜索" onClick={() => setQuery('')}><X size={15} /></button>}</label></div></div>
         {search && <p className="sh-search-status" role="status">{activeProject !== null ? `在「${activeProject}」中` : '全部项目中'}找到 {visible.length} 份相关资料</p>}
         {!search && activeProject === null && <div className="sh-projects" aria-label="我的项目">{projects.map((name, index) => { const projectDocs = docs.filter(doc => doc.course === name); const ids = new Set(projectDocs.map(doc => doc.id)); const count = threads.filter(thread => ids.has(thread.docId) && thread.messages.length).length; return <button type="button" key={name} className="sh-project-card" onClick={() => setProject(name)}><span className="sh-folder" data-tone={index % 4}><FolderOpen size={20} strokeWidth={1.5} /></span><h3>{name || '未分类项目'}</h3><p>{projectDocs.length} 份资料<span>{count} 条讨论</span></p><span className="sh-project-open">进入项目<ChevronRight size={16} /></span></button>; })}</div>}
-        {(search || activeProject !== null || ordered.some(doc => !!doc.visited)) && <section className="sh-documents" aria-label={search ? '搜索结果' : activeProject !== null ? '项目资料' : '最近阅读'}>
+        {(search || activeProject !== null || recentDocs.length>0) && <section className="sh-documents" aria-label={search ? '搜索结果' : activeProject !== null ? '项目资料' : '最近资料'}>
           {!search && activeProject === null ? <h2>最近阅读</h2> : sortedVisible.length>0 && <div className="sh-document-toolbar"><select className="sh-sort" aria-label="文件排序方式" value={sort} onChange={event => setSort(event.target.value === 'name' ? 'name' : 'recent')}><option value="recent">最近打开</option><option value="name">文件名称</option></select></div>}
-          {(activeProject === null && !search ? visible.filter(doc => !!doc.visited).slice(0, 5) : sortedVisible).map(doc => { const matched = search ? threads.filter(thread => thread.docId === doc.id).find(thread => thread.messages.some(message => message.role === 'user' && message.content.toLocaleLowerCase().includes(search))) : undefined; const question = matched?.messages.find(message => message.role === 'user' && message.content.toLocaleLowerCase().includes(search)); return <div className="sh-material-row" key={doc.id}><button type="button" className="sh-document" onClick={() => matched ? onOpenDoc(doc, question?.page ?? matched.page, matched.id) : openDocument(doc)}><span className="sh-file"><FileText size={20} /><small>{doc.kind.toUpperCase()}</small></span><span className="sh-document-copy"><strong>{title(doc)}</strong><span>{doc.course}{question ? ` · 匹配提问：${question.content}` : ''}</span></span><time>{dateLabel(doc.visited)}</time><ChevronRight size={17} /></button>{doc.id!=='sample'&&<details className="sh-project-menu" name="study-material-actions">
+          {(activeProject === null && !search ? recentDocs : sortedVisible).map(doc => {
+            const matches=search?threads.flatMap(thread=>thread.docId===doc.id
+              ?thread.messages.filter(message=>message.role==='user'&&message.content.toLocaleLowerCase().includes(search)).map(message=>({thread,message}))
+              :[]):[];
+            const firstMatch=matches[0];
+            return <div className="sh-material-row" key={doc.id}>
+              <button type="button" className="sh-document" onClick={()=>firstMatch
+                ?onOpenDoc(doc,firstMatch.message.page??firstMatch.thread.page,firstMatch.thread.id)
+                :openDocument(doc)}>
+                <span className="sh-file"><FileText size={20}/><small>{doc.kind.toUpperCase()}</small></span>
+                <span className="sh-document-copy"><strong>{title(doc)}</strong><span>{doc.course}{firstMatch?` · 匹配提问：${firstMatch.message.content}`:''}</span></span>
+                <time>{dateLabel(doc.visited)}</time><ChevronRight size={17}/>
+              </button>
+              {matches.length>1&&<details className="sh-search-matches"><summary>{matches.length} 条提问命中</summary><div>{matches.map(({thread,message},index)=><button type="button" key={`${thread.id}-${message.createdAt??index}`} onClick={()=>onOpenDoc(doc,message.page??thread.page,thread.id)}><span>{message.content}</span><small>第 {message.page??thread.page} 页</small></button>)}</div></details>}
+              {doc.id!=='sample'&&<details className="sh-project-menu" name="study-material-actions">
             <summary aria-label={`整理 ${doc.name}`}><MoreHorizontal size={17} aria-hidden="true"/></summary>
             <div className="sh-project-actions"><button type="button" onClick={event=>{event.currentTarget.closest('details')?.removeAttribute('open');onMoveDoc(doc);}}>移动到项目</button></div>
           </details>}</div>; })}

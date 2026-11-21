@@ -9,7 +9,7 @@ import {readProgress,recentReader,saveProgress,type ReadingProgress} from './rea
 
 export type ReaderSelection = { page: number; text?: string; image?: string; rect?: number[]; captureId?:string };
 export type ReaderAnnotation = {id:string;page:number;label:string;rect?:number[]};
-export type Props = { documentId:string; navigation:{resume:boolean;revision:number}; lookup: React.RefObject<import('./study-context').PageReader|null>; url: string; kind: 'pdf'|'pptx'; page: number; onSelect: (s:ReaderSelection,action?:'ask'|'add'|'save')=>void; onCrop: (s:ReaderSelection)=>boolean; onCropStart:()=>string; onCropState:(pending:boolean,captureId:string)=>void; onPage: (page:number)=>void; onDismiss:()=>void; focusRect?: number[]; focusPage?: number; annotations?:ReaderAnnotation[]; onOpenAnnotation?:(id:string,page:number)=>void };
+export type Props = { documentId:string; navigation:{resume:boolean;revision:number}; lookup: React.RefObject<import('./study-context').PageReader|null>; url: string; kind: 'pdf'|'pptx'; page: number; onSelect: (s:ReaderSelection,action?:'ask'|'add'|'save')=>void; onCrop: (s:ReaderSelection)=>boolean; onCropStart:()=>string; onCropState:(pending:boolean,captureId:string)=>void; onPage: (page:number)=>void; onDismiss:()=>void; onReady?:()=>void; focusRect?: number[]; focusPage?: number; annotations?:ReaderAnnotation[]; onOpenAnnotation?:(id:string,page:number)=>void };
 type PdfDocument = import('pdfjs-dist').PDFDocumentProxy;
 type Deck = { pres: Awaited<ReturnType<typeof import('@office-kit/pptx').loadPresentation>>; slides: ReturnType<typeof import('@office-kit/pptx').getSlides> };
 
@@ -53,7 +53,7 @@ function addSlideTextLayer(layer: HTMLDivElement) {
   });
 }
 
-export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,page,onPage,onSelect,onCrop,onCropStart,onCropState,onDismiss,focusRect,focusPage,annotations=[],onOpenAnnotation}: Props) {
+export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,page,onPage,onSelect,onCrop,onCropStart,onCropState,onDismiss,onReady,focusRect,focusPage,annotations=[],onOpenAnnotation}: Props) {
   const [pdf, setPdf] = useState<PdfDocument|null>(null);
   const [deck, setDeck] = useState<Deck|null>(null);
   const [count,setCount] = useState(0), [busy,setBusy] = useState(true), [error,setError] = useState('');
@@ -261,8 +261,9 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
       }else{const {renderSlideToSvg}=await import('@office-kit/pptx-preview');const markup=await safeSvg(renderSlideToSvg(deck!.pres,deck!.slides[n-1],{textLayout:'svg',eastAsianFamily:'sans-serif'}));content=Array.from(new DOMParser().parseFromString(markup,'image/svg+xml').querySelectorAll('text'),t=>t.textContent).join(' ');if(includeImage)image='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(markup);}
       return {page:n,text:content.slice(0,4500),image};
     }};
+    onReady?.();
     return ()=>{lookupRef.current=null};
-  },[pdf,deck,count,lookupRef,documentId,current,layout,onPage,saveLocation]);
+  },[pdf,deck,count,lookupRef,documentId,current,layout,onPage,onReady,saveLocation]);
 
 
   const visiblePages=layout==='single'?[current]:Array.from({length:count},(_,index)=>index+1);
@@ -284,6 +285,7 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
       </form>
       <button aria-label="下一页" disabled={current>=count} onClick={()=>goToPage(current+1)}><ChevronRight size={17}/></button></div>
       <details className="reader-thumbnails"><summary aria-label="打开页面缩略图">缩略图</summary><div role="listbox" aria-label="选择页面">{thumbnailPages.map(number=><button type="button" role="option" aria-selected={current===number} key={number} onClick={()=>goToPage(number)}><span>第 {number} 页</span><div className="reader-thumbnail"><ContinuousPage current={number} pdf={pdf} deck={deck} kind={kind} zoom={1} mode="text" onSelect={()=>{}} onCrop={()=>false} onCropStart={()=>''} onCropState={()=>{}} feedback={null} priority focusRect={undefined}/></div></button>)}</div></details>
+      {annotations.some(item=>item.page===current)&&<details className="reader-annotation-list"><summary>本页批注 · {annotations.filter(item=>item.page===current).length}</summary><div>{annotations.filter(item=>item.page===current).map(item=><button type="button" key={item.id} onClick={()=>onOpenAnnotation?.(item.id,item.page)}>{item.label}</button>)}</div></details>}
       <div><button aria-pressed={mode==='text'} onClick={()=>setMode('text')}><TextSelect size={16}/>选文字</button>
       <button aria-pressed={mode==='crop'} onClick={()=>setMode('crop')}><Scan size={16}/>框选图片</button>
       <button aria-pressed={layout==='continuous'} onClick={()=>setLayout('continuous')}>连续</button>

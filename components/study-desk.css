@@ -25,11 +25,19 @@
 .screenshot-attachments figure{position:relative;flex:0 0 88px;display:grid;grid-template-rows:64px auto;gap:4px;margin:0;padding:4px;border:1px solid var(--line);border-radius:7px;background:var(--paper)}
 .screenshot-attachments img{width:100%;height:64px;object-fit:contain;background:#fff;border-radius:4px}
 .screenshot-attachments figcaption{overflow:hidden;color:var(--muted);font-size:11px;text-align:center;text-overflow:ellipsis;white-space:nowrap}
+.screenshot-preview{display:grid;grid-template-rows:64px auto;width:100%;min-width:0;padding:0;background:transparent}
+.screenshot-remove{position:absolute;top:1px;right:1px;width:24px;height:24px;border:1px solid var(--line);border-radius:50%;background:var(--paper);color:var(--error);font-size:16px;line-height:1}
+.screenshot-remove:hover{background:var(--accent-soft)}
+.citation-chip:not(:has(.citation-locate)){display:none}
+.screenshot-preview-dialog{width:min(960px,calc(100vw - 32px));max-width:none;max-height:90dvh;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink)}
+.screenshot-preview-dialog::backdrop{background:#1d1b1680}
+.screenshot-preview-dialog header{display:flex;align-items:center;justify-content:space-between;min-height:40px}
+.screenshot-preview-dialog>img{display:block;width:100%;max-height:calc(90dvh - 72px);object-fit:contain}
 .reader-draft-entry{min-height:34px;padding:5px 10px;border:1px solid var(--line);border-radius:7px;background:var(--accent-soft);color:var(--accent-ink);font-size:.8rem}
 .workspace .reader-column>.reader-hint:has(.reader-draft-entry){display:flex;align-items:center;gap:8px;min-height:36px;padding:2px 8px}
 .workspace .reader-draft-entry:hover,.workspace .reader-draft-entry:focus-visible{background:var(--accent);color:var(--ink)}
 .reader-crop-feedback{position:absolute;z-index:12;max-width:min(280px,80%);padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-size:12px;box-shadow:0 5px 18px #201b1620;pointer-events:none;animation:selection-arrive 130ms ease-out}
-@media(max-width:650px){.screenshot-attachments figure{flex-basis:76px;grid-template-rows:54px auto}.screenshot-attachments img{height:54px}.workspace .reader-column>.reader-hint:has(.reader-draft-entry){justify-content:space-between}}
+@media(max-width:650px){.screenshot-attachments figure{flex-basis:76px;grid-template-rows:54px auto}.screenshot-attachments img{height:54px}.screenshot-preview{grid-template-rows:54px auto}.workspace .reader-column>.reader-hint:has(.reader-draft-entry){justify-content:space-between}}
 @media(prefers-reduced-motion:reduce){.reader-crop-feedback{animation:none}}
 .selected-passage .image-remove{margin-left:6px;width:24px;min-height:24px;border-radius:4px;font-size:16px}
 .selected-passage .image-remove:hover{background:var(--accent-soft)}
@@ -58,7 +66,11 @@
 .thread-search-label{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:7px;padding:8px;background:var(--paper);border-bottom:1px solid var(--line);color:var(--muted)}
 .thread-search-label input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;font-size:14px}
 .thread-search-empty{padding:12px;color:var(--muted);font-size:13px;text-align:center}
-.reader-annotation-list button{display:block}
+.reader-annotation-list{position:relative;display:none}
+.reader-annotation-list>summary{min-height:36px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;cursor:pointer;list-style:none}
+.reader-annotation-list>summary::-webkit-details-marker{display:none}
+.reader-annotation-list[open]>div{position:absolute;top:calc(100% + 6px);left:0;z-index:16;display:grid;gap:4px;width:min(300px,calc(100vw - 32px));max-height:min(50dvh,320px);overflow:auto;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);box-shadow:0 8px 24px #201b1620}
+.reader-annotation-list button{display:block;width:100%;min-height:40px;padding:8px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .thread-strip>.icon-button{justify-self:end}
 .project-memory>label{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--muted)}
 .project-memory select,.memory-status{border:1px solid var(--line);border-radius:5px;padding:5px 9px;background:var(--surface);color:var(--ink)}
