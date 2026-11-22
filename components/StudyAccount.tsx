@@ -130,9 +130,15 @@ export default function StudyAccount({ onClose, showAdmin = false, accountSource
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [retryCursors, setRetryCursors] = useState<(string | null)[]>([null]);
-  const [leavesEnabled, setLeavesEnabled] = useState(true);
-  const [leafCount, setLeafCount] = useState(DEFAULT_LEAF_COUNT);
-  const [leafSize, setLeafSize] = useState(DEFAULT_LEAF_SIZE);
+  const [leavesEnabled, setLeavesEnabled] = useState(()=>{
+    try{return localStorage.getItem('pagewise:background-motion')!=='off';}catch{return true;}
+  });
+  const [leafCount, setLeafCount] = useState(()=>{
+    try{return clampLeafCount(localStorage.getItem('pagewise:leaf-count')??DEFAULT_LEAF_COUNT);}catch{return DEFAULT_LEAF_COUNT;}
+  });
+  const [leafSize, setLeafSize] = useState(()=>{
+    try{return clampLeafSize(localStorage.getItem('pagewise:leaf-size')??DEFAULT_LEAF_SIZE);}catch{return DEFAULT_LEAF_SIZE;}
+  });
 
   function updateLeavesEnabled(enabled: boolean) {
     setLeavesEnabled(enabled);
@@ -193,22 +199,6 @@ export default function StudyAccount({ onClose, showAdmin = false, accountSource
   }
 
   useEffect(() => {
-    try {
-      const enabled = localStorage.getItem('pagewise:background-motion') !== 'off';
-      const storedCount = localStorage.getItem('pagewise:leaf-count');
-      const storedSize = localStorage.getItem('pagewise:leaf-size');
-      const resolvedCount = storedCount != null ? clampLeafCount(storedCount) : DEFAULT_LEAF_COUNT;
-      const resolvedSize = storedSize != null ? clampLeafSize(storedSize) : DEFAULT_LEAF_SIZE;
-      setLeavesEnabled(enabled);
-      setLeafCount(resolvedCount);
-      setLeafSize(resolvedSize);
-      document.documentElement.dataset.backgroundMotion = enabled ? 'on' : 'off';
-      document.documentElement.dataset.leafCount = String(resolvedCount);
-      document.documentElement.dataset.leafSize = String(resolvedSize);
-    } catch {}
-  }, []);
-
-  useEffect(() => {
     const element = dialog.current;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
@@ -244,7 +234,7 @@ export default function StudyAccount({ onClose, showAdmin = false, accountSource
       </section>
       <section className="study-account__appearance study-account__appearance--leaves" aria-labelledby="study-account-background">
         <div className="study-account__appearance-head">
-          <div><h3 id="study-account-background">背景动效</h3><p>在首页和项目页显示缓缓飘落的秋叶，可调整叶片数量与平均大小。</p></div>
+          <div><h3 id="study-account-background">背景动效</h3><p>在宽屏学习首页显示落叶，可调整叶片数量与平均大小。</p></div>
           <label className="study-account__switch"><input type="checkbox" checked={leavesEnabled} onChange={event => updateLeavesEnabled(event.currentTarget.checked)}/><span>显示叶片</span></label>
         </div>
         <div className={`study-account__leaf-controls${leavesEnabled ? '' : ' is-disabled'}`} aria-label="秋叶参数调节">

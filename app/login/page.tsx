@@ -112,7 +112,7 @@ export default async function LoginPage({
                   <p>
                     {ready ? "在验证页关联一种新的登录方式，下次仍可进入同一资料库。" : "外部登录服务开通后，即可关联新的登录方式。"}
                   </p>
-                  <form method="post" action="/api/auth/login?intent=link">
+                  <form noValidate method="post" action="/api/auth/login?intent=link">
                     {returnTo && <input type="hidden" name="return_to" value={returnTo} />}
                     <button className={styles.secondaryAction} type="submit" disabled={!ready}>
                       关联外部登录 <ArrowRight size={16} aria-hidden="true" />

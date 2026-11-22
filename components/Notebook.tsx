@@ -35,12 +35,13 @@ function scrollPreview(event:ReactKeyboardEvent<HTMLDivElement>){
  surface.scrollTop+=down?48:-48;
 }
 
-export default function Notebook({visible,inserts,onAppend}:{visible:boolean;inserts:{text:string;id:number}[];onAppend:(id:number)=>void}){
+export default function Notebook({visible,inserts,onAppend,onSaved}:{visible:boolean;inserts:{text:string;id:number}[];onAppend:(id:number)=>void;onSaved:(id:number)=>void}){
  const [body,setBody]=useState(''),[revision,setRevision]=useState(-1),[preview,setPreview]=useState(false),[status,setStatus]=useState('正在读取…');
  const area=useRef<HTMLTextAreaElement>(null),last=useRef(''),saving=useRef(false),inserted=useRef(0),[attempt,retry]=useState(0),[blocked,setBlocked]=useState(false);
  const [prefs,setPrefs]=useState(defaults);
  const [page,setPage]=useState(0);
  const [menu,setMenu]=useState(false);
+ const [reloading,setReloading]=useState(false);
  const actions=useRef<HTMLDivElement>(null),importFile=useRef<HTMLInputElement>(null),stage=useRef<HTMLDialogElement>(null);
  const [dialogPortal,setDialogPortal]=useState<HTMLElement|null>(null);
  const [expanded,setExpanded]=useState(false);
@@ -82,10 +83,44 @@ export default function Notebook({visible,inserts,onAppend}:{visible:boolean;ins
    setBody(value=>[value.trimEnd(),...pending.map(item=>item.text)].filter(Boolean).join('\n\n'));
    onAppend(latest.id);
  },[inserts,revision,onAppend]);
- useEffect(()=>{if(revision<0||blocked||last.current===body)return;
-  setStatus('待保存');const warn=(e:BeforeUnloadEvent)=>e.preventDefault();window.addEventListener('beforeunload',warn);
-  const timer=setTimeout(async()=>{if(saving.current)return;saving.current=true;setStatus('保存中…');try{const r=await fetch('/api/study/notebook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body,revision})});const data=await r.json() as {body:string;revision:number;error?:string};if(!r.ok){if(r.status===409)setBlocked(true);throw Error(data.error||'保存失败');}last.current=body;setStatus('已同步');setRevision(data.revision);window.dispatchEvent(new Event('pagewise:credits-changed'));}catch(e){setStatus(e instanceof Error?e.message:'保存失败');}finally{saving.current=false;}},500);
-  return()=>{clearTimeout(timer);window.removeEventListener('beforeunload',warn);};},[body,revision,attempt,blocked]);
+ useEffect(()=>{
+  if(revision<0||last.current===body)return;
+  const warn=(e:BeforeUnloadEvent)=>e.preventDefault();
+  window.addEventListener('beforeunload',warn);
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  if(!blocked)timer=setTimeout(async()=>{
+    if(saving.current){retry(value=>value+1);return;}
+    saving.current=true;
+    const savedInsert=inserted.current;
+    setStatus('保存中…');
+    try{
+      const response=await fetch('/api/study/notebook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body,revision})});
+      const data=await response.json() as {revision:number;error?:string};
+      if(!response.ok){if(response.status===409)setBlocked(true);throw new Error(data.error||'保存失败');}
+      last.current=body;
+      setStatus('已同步');
+      setRevision(data.revision);
+      onSaved(savedInsert);
+      window.dispatchEvent(new Event('pagewise:credits-changed'));
+    }catch(error){setStatus(error instanceof Error?error.message:'保存失败');}
+    finally{saving.current=false;}
+  },500);
+  return()=>{clearTimeout(timer);window.removeEventListener('beforeunload',warn);};
+ },[body,revision,attempt,blocked,onSaved]);
+ async function reloadSaved(){
+   setReloading(true);
+   try{
+     const response=await fetch('/api/study/notebook');
+     const data=await response.json() as {body:string;revision:number;error?:string};
+     if(!response.ok)throw new Error(data.error||'无法读取已保存版本');
+     last.current=data.body;
+     setBody(data.body);
+     setRevision(data.revision);
+     setBlocked(false);
+     setStatus('已同步');
+   }catch(error){setStatus(error instanceof Error?error.message:'无法读取已保存版本');}
+   finally{setReloading(false);}
+ }
  function wrap(left:string,right:string,h=false){const el=area.current;if(!el)return;const start=h?body.lastIndexOf('\n',el.selectionStart-1)+1:el.selectionStart;const end=el.selectionEnd;const selected=body.slice(start,end);const before=h?selected.replace(/^#{1,6}\s+/,''):selected;setBody(body.slice(0,start)+left+before+right+body.slice(end));requestAnimationFrame(()=>{el.focus();el.setSelectionRange(start+left.length,start+left.length+before.length)});}
  function download(){const url=URL.createObjectURL(new Blob([body],{type:'text/markdown;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='我的学习笔记.md';a.click();setTimeout(()=>URL.revokeObjectURL(url),5000);}
  function normalize(){
@@ -174,6 +209,7 @@ export default function Notebook({visible,inserts,onAppend}:{visible:boolean;ins
        role="region" aria-label="笔记预览" onKeyDown={scrollPreview}>{previewContent()}</div>:
        <textarea ref={area} disabled={revision<0} aria-label="Markdown 学习笔记" value={body} onChange={e=>setBody(e.target.value)} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='b'){e.preventDefault();wrap('**','**')}}} placeholder="写下你的笔记…"/>}
    </div>
+   {blocked&&<section className="nb-conflict" role="alert"><p>笔记已在其他位置更新。导出当前编辑后，可重新读取已保存版本。</p><button type="button" onClick={download}>导出当前编辑</button><button type="button" disabled={reloading} onClick={()=>void reloadSaved()}>{reloading?'正在读取…':'用已保存版本替换当前编辑'}</button></section>}
    <footer className="nb-status"><span role="status" className={status==='已同步'?'nb-status-saved':''}>{status==='已同步'&&<Check size={13}/>} {status}</span><span>{body.length.toLocaleString()} 字符</span></footer>
    <dialog ref={node=>{stage.current=node;if(node)setDialogPortal(node)}} className="nb-dialog" onClose={()=>setExpanded(false)}><header><strong>学习笔记</strong>{expanded&&outline(true)}{slide&&navigation()}<button aria-label="关闭放大预览" onClick={()=>stage.current?.close()}>关闭</button></header>{expanded&&<div ref={node=>{expandedPreviewHost.current=node;setExpandedPreviewElement(node)}} className={'nb-preview'+(slide?' paper-stage':'')}
      tabIndex={0} role="region" aria-label="放大的笔记预览" onKeyDown={scrollPreview}>{previewContent()}</div>}</dialog>

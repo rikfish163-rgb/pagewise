@@ -75,6 +75,8 @@ export function TutorControls({value,onChange,availability}:{value:TutorSettings
       {!selected&&<option value="">{availability.status==='loading'?'查询中…':'暂无可用模型'}</option>}
       {models.map(m=><option key={m.id} value={m.id}>{m.label}{m.deprecated?'（已弃用）':''}</option>)}
     </select></label>
+    <details className="tutor-options" onKeyDown={event=>{if(event.key==='Escape'&&event.currentTarget.open){event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}>
+    <summary>设置</summary><div>
     <label className="tutor-effort"><span>思考强度</span><select aria-label="思考强度" disabled={disabled||!selected} value={selected?value.reasoningEffort:''} onChange={e=>onChange({...value,reasoningEffort:e.target.value as ReasoningEffort})}>
       {!selected&&<option value="">—</option>}
       {selected?.reasoningEfforts.map(e=><option key={e} value={e}>{labels[e]}</option>)}
@@ -83,6 +85,7 @@ export function TutorControls({value,onChange,availability}:{value:TutorSettings
       {!selected&&<option value="">—</option>}
       {selected?.speeds.map(speed=><option key={speed} value={speed}>{speedLabels[speed]}</option>)}
     </select></label>
+    </div></details>
     {availability.status!=='ready'&&<div className="tutor-model-status" role="status"><span>{availability.message}</span>{availability.status!=='loading'&&<button type="button" onClick={availability.reload}>重查</button>}</div>}
   </div>;
 }

@@ -16,7 +16,8 @@ export default function DeskDivider({side='right'}:{side?:'left'|'right'}){
     function maximum(){
       const css=getComputedStyle(desk);
       if(left)return Math.max(minimum,Math.min(420,desk.clientWidth-280-parseFloat(css.getPropertyValue('--page-floor'))));
-      return Math.max(minimum,desk.clientWidth-(matchMedia('(max-width:950px)').matches?0:desk.querySelector('.library')!.getBoundingClientRect().width)-parseFloat(css.getPropertyValue('--page-floor')));
+      const shelfWidth=parseFloat(css.gridTemplateColumns.split(' ')[0]);
+      return Math.max(minimum,desk.clientWidth-(matchMedia('(max-width:1169px)').matches||desk.dataset.folded==='true'?0:shelfWidth)-parseFloat(css.getPropertyValue('--page-floor')));
     }
     function setWidth(px:number){
       desk.style.setProperty(variable,Math.min(maximum(),Math.max(minimum,Math.round(px)))+'px');

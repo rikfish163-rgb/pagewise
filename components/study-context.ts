@@ -1,9 +1,10 @@
 import type {Selection} from '../lib/workspace-model';
+type ReaderLocation={page:number;scrollTop:number;anchorPage:number;fraction:number;layout:'continuous'|'single';zoom:number};
 export type PageReader = {
  count:number;
  read:(page:number,includeImage?:boolean)=>Promise<Selection>;
- getLocation:()=>{page:number;scrollTop:number;anchorPage:number;fraction:number;layout:'continuous'|'single'};
- restoreLocation:(location:{page:number;scrollTop:number;anchorPage:number;fraction:number;layout:'continuous'|'single'})=>void;
+ getLocation:()=>ReaderLocation;
+ restoreLocation:(location:ReaderLocation)=>void;
 };
 
 export function isOverview(question:string){

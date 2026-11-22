@@ -97,12 +97,12 @@ textarea.admin-credits-input {
 .admin-credits-button.is-primary {
   border-color: var(--accent-ink);
   background: var(--accent-ink);
-  color: var(--paper);
+  color: var(--accent-foreground);
 }
 
 .admin-credits-button.is-primary:hover:not(:disabled) {
-  background: var(--error);
-  color: var(--paper);
+  background: var(--accent-hover);
+  color: var(--accent-foreground);
 }
 
 .admin-credits-summary,

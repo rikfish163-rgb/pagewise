@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { AdminCredits } from '@/components/AdminCredits';
 import { getSiteAccount } from '../../site-account';
@@ -13,7 +14,7 @@ export default async function AdminCreditsPage() {
   return (
     <main className="admin-credits">
       <header className="admin-credits-heading">
-        <a href="/#home">‹ 返回页边</a>
+        <Link href="/#home">‹ 返回页边</Link>
         <h1>积分管理</h1>
       </header>
       <AdminCredits />

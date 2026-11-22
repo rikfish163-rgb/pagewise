@@ -78,7 +78,6 @@
   margin-bottom: 14px;
   padding: 9px 12px;
   border: 1px solid var(--line);
-  border-inline-start: 3px solid var(--accent-ink);
   border-radius: 5px;
   background: var(--paper);
 }
@@ -168,11 +167,19 @@ button.method:disabled {
   padding-inline: 15px;
   border-color: transparent;
   background: var(--accent);
-  color: var(--ink);
+  color: var(--accent-foreground);
 }
 
 .primary:hover {
   background: var(--accent-hover);
+  color: var(--accent-foreground);
+}
+
+@media (min-width: 701px) {
+  .shell { display: block; }
+  .sidebar { display: flex; justify-content: space-between; align-items: center; padding: 8px max(24px,calc((100vw - 1120px) / 2)); border: 0; }
+  .brand { margin: 0; }
+  .nav { display: flex; }
 }
 
 .identity {

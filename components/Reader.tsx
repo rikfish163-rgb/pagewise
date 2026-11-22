@@ -9,7 +9,7 @@ import {readProgress,recentReader,saveProgress,type ReadingProgress} from './rea
 
 export type ReaderSelection = { page: number; text?: string; image?: string; rect?: number[]; captureId?:string };
 export type ReaderAnnotation = {id:string;page:number;label:string;rect?:number[]};
-export type Props = { documentId:string; navigation:{resume:boolean;revision:number}; lookup: React.RefObject<import('./study-context').PageReader|null>; url: string; kind: 'pdf'|'pptx'; page: number; onSelect: (s:ReaderSelection,action?:'ask'|'add'|'save')=>void; onCrop: (s:ReaderSelection)=>boolean; onCropStart:()=>string; onCropState:(pending:boolean,captureId:string)=>void; onPage: (page:number)=>void; onDismiss:()=>void; onReady?:()=>void; focusRect?: number[]; focusPage?: number; annotations?:ReaderAnnotation[]; onOpenAnnotation?:(id:string,page:number)=>void };
+export type Props = { documentId:string; navigation:{resume:boolean;revision:number;temporary?:boolean}; lookup: React.RefObject<import('./study-context').PageReader|null>; url: string; kind: 'pdf'|'pptx'; page: number; onSelect: (s:ReaderSelection,action?:'ask'|'add'|'save')=>void; onCrop: (s:ReaderSelection)=>boolean; onCropStart:()=>string; onCropState:(pending:boolean,captureId:string)=>void; onPage: (page:number)=>void; onDismiss:()=>void; onReady?:()=>void; focusRect?: number[]; focusPage?: number; annotations?:ReaderAnnotation[]; onOpenAnnotation?:(id:string,page:number)=>void };
 type PdfDocument = import('pdfjs-dist').PDFDocumentProxy;
 type Deck = { pres: Awaited<ReturnType<typeof import('@office-kit/pptx').loadPresentation>>; slides: ReturnType<typeof import('@office-kit/pptx').getSlides> };
 
@@ -59,7 +59,10 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
   const [count,setCount] = useState(0), [busy,setBusy] = useState(true), [error,setError] = useState('');
   const [zoom,setZoom] = useState(1), [mode,setMode] = useState<'text'|'crop'>('text');
   const [layout,setLayout]=useState<'continuous'|'single'>(kind==='pptx'?'single':'continuous');
+  const [thumbnailsOpen,setThumbnailsOpen]=useState(false);
+  const thumbnailsMenu=useRef<HTMLDetailsElement>(null);
   const [selectionAction,setSelectionAction]=useState<ReaderSelection|null>(null);
+  const selectionTools=useRef<HTMLDivElement>(null);
   const queueSelection=(selection:ReaderSelection)=>setSelectionAction(selection);
   const [cropFeedback,setCropFeedback]=useState<{message:string;rect:number[];page:number}|null>(null);
   const feedbackTimer=useRef<number|null>(null);
@@ -104,8 +107,8 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
     const next=pages.children[low+1] as HTMLElement|undefined;
     const span=next?next.offsetTop-anchor.offsetTop:anchor.offsetHeight;
     const offset=reader.scrollTop-(anchor.offsetTop-first);
-    saveProgress(documentId,{page:visiblePage,anchorPage:low+1,fraction:Math.max(0,Math.min(1,offset/Math.max(1,span)))});
-  },[documentId]);
+    if(!navigation.temporary)saveProgress(documentId,{page:visiblePage,anchorPage:low+1,fraction:Math.max(0,Math.min(1,offset/Math.max(1,span)))});
+  },[documentId,navigation.temporary]);
 
   function readScroll(){
     const reader=scroll.current,pages=stack.current;
@@ -138,6 +141,12 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
     }
     reported.current=next;
     onPage(next);
+  }
+
+  function chooseThumbnail(event:React.MouseEvent<HTMLButtonElement>){
+    goToPage(Number(event.currentTarget.value));
+    const menu=thumbnailsMenu.current;
+    if(menu){menu.open=false;menu.querySelector('summary')?.focus();}
   }
 
   useLayoutEffect(()=>{
@@ -248,8 +257,8 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
 
   useLayoutEffect(()=>{
     if(!pdf&&!deck)return;
-    lookupRef.current={count,getLocation:()=>{const saved=readProgress(documentId);return {page:current,scrollTop:scroll.current?.scrollTop??0,anchorPage:saved?.anchorPage??current,fraction:saved?.fraction??0,layout}},restoreLocation:location=>{
-      setLayout(location.layout);reported.current=location.page;onPage(location.page);
+    lookupRef.current={count,getLocation:()=>{const saved=readProgress(documentId);return {page:current,scrollTop:scroll.current?.scrollTop??0,anchorPage:saved?.anchorPage??current,fraction:saved?.fraction??0,layout,zoom}},restoreLocation:location=>{
+      setLayout(location.layout);setZoom(location.zoom);reported.current=location.page;onPage(location.page);
       requestAnimationFrame(()=>{const reader=scroll.current,pages=stack.current;if(!reader||!pages)return;if(location.layout==='continuous'&&pages.children.length===count){jump(reader,pages,pageWithin(location.anchorPage,count),location.fraction);saveLocation(reader,pages,location.page)}else reader.scrollTop=location.scrollTop});
     },read:async(n,includeImage=true)=>{
       if(!pdf&&!deck)throw Error('课件正在加载，请稍后重试。');
@@ -263,13 +272,38 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
     }};
     onReady?.();
     return ()=>{lookupRef.current=null};
-  },[pdf,deck,count,lookupRef,documentId,current,layout,onPage,onReady,saveLocation]);
+  },[pdf,deck,count,lookupRef,documentId,current,layout,zoom,onPage,onReady,saveLocation]);
 
 
   const visiblePages=layout==='single'?[current]:Array.from({length:count},(_,index)=>index+1);
   const thumbnailPages=Array.from({length:count},(_,index)=>index+1).slice(Math.max(0,current-3),Math.min(count,current+2));
+  useLayoutEffect(()=>{
+    const tools=selectionTools.current;
+    const viewport=scroll.current;
+    const root=tools?.parentElement;
+    const bounds=selectionAction?.rect;
+    const page=stack.current?.querySelector<HTMLElement>(`[data-page="${selectionAction?.page}"]`);
+    if(!tools||!viewport||!root||!page||!bounds)return;
+    const position=()=>{
+      const parent=root.getBoundingClientRect();
+      const visible=viewport.getBoundingClientRect();
+      const sheet=page.getBoundingClientRect();
+      const y=sheet.top+(bounds[1]+bounds[3])*sheet.height;
+      const before=sheet.top+bounds[1]*sheet.height-tools.offsetHeight-8;
+      const desired=y+tools.offsetHeight+8<=visible.bottom?y+8:before;
+      tools.style.top=Math.max(visible.top+4,Math.min(desired,visible.bottom-tools.offsetHeight-4))-parent.top+'px';
+      const x=sheet.left+bounds[0]*sheet.width-parent.left;
+      tools.style.left=Math.max(6,Math.min(x,parent.width-tools.offsetWidth-6))+'px';
+    };
+    position();
+    const observer=new ResizeObserver(position);
+    observer.observe(viewport);
+    viewport.addEventListener('scroll',position,{passive:true});
+    return ()=>{observer.disconnect();viewport.removeEventListener('scroll',position);};
+  },[selectionAction]);
+
   return <section className="document-reader" aria-label="文档阅读器">
-    {selectionAction&&<div className="reader-selection-actions" role="group" aria-label="选区操作"><span title={selectionAction.text||'已框选图片'}>{selectionAction.text||'图表选区'} · 第 {selectionAction.page} 页</span><button type="button" onClick={()=>{onSelect(selectionAction,'ask');setSelectionAction(null)}}>提问</button><button type="button" onClick={()=>{onSelect(selectionAction,'add');setSelectionAction(null)}}>加入当前问题</button>{selectionAction.text&&<button type="button" onClick={()=>{onSelect(selectionAction,'save');setSelectionAction(null)}}>存为摘录</button>}<button type="button" aria-label="取消选区操作" onClick={()=>setSelectionAction(null)}>取消</button></div>}
+    {selectionAction&&<div ref={selectionTools} className="reader-selection-actions" role="group" aria-label="选区操作"><span title={selectionAction.text||'已框选图片'}>{selectionAction.text||'图表选区'} · 第 {selectionAction.page} 页</span><button type="button" onClick={()=>{onSelect(selectionAction,'ask');setSelectionAction(null)}}>提问</button><button type="button" onClick={()=>{onSelect(selectionAction,'add');setSelectionAction(null)}}>加入当前问题</button>{selectionAction.text&&<button type="button" onClick={()=>{onSelect(selectionAction,'save');setSelectionAction(null)}}>存为摘录</button>}<button type="button" aria-label="取消选区操作" onClick={()=>setSelectionAction(null)}>取消</button></div>}
     <div className="reader-toolbar">
       <div><button aria-label="上一页" disabled={current<=1 || !count} onClick={()=>goToPage(current-1)}><ChevronLeft size={17}/></button>
       <form className="reader-jump" onSubmit={e=>{
@@ -284,14 +318,18 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
         <button type="submit" disabled={!count}>跳转</button>
       </form>
       <button aria-label="下一页" disabled={current>=count} onClick={()=>goToPage(current+1)}><ChevronRight size={17}/></button></div>
-      <details className="reader-thumbnails"><summary aria-label="打开页面缩略图">缩略图</summary><div role="listbox" aria-label="选择页面">{thumbnailPages.map(number=><button type="button" role="option" aria-selected={current===number} key={number} onClick={()=>goToPage(number)}><span>第 {number} 页</span><div className="reader-thumbnail"><ContinuousPage current={number} pdf={pdf} deck={deck} kind={kind} zoom={1} mode="text" onSelect={()=>{}} onCrop={()=>false} onCropStart={()=>''} onCropState={()=>{}} feedback={null} priority focusRect={undefined}/></div></button>)}</div></details>
+      <details ref={thumbnailsMenu} className="reader-thumbnails" onToggle={event=>setThumbnailsOpen(event.currentTarget.open)}><summary aria-label="打开页面缩略图">缩略图</summary><div role="listbox" aria-label="选择页面">{thumbnailsOpen&&thumbnailPages.map(number=><button type="button" role="option" aria-selected={current===number} key={number} value={number} onClick={chooseThumbnail}><span>第 {number} 页</span><div className="reader-thumbnail"><ContinuousPage current={number} pdf={pdf} deck={deck} kind={kind} zoom={1} mode="text" onSelect={()=>{}} onCrop={()=>false} onCropStart={()=>''} onCropState={()=>{}} feedback={null} priority focusRect={undefined}/></div></button>)}</div></details>
       {annotations.some(item=>item.page===current)&&<details className="reader-annotation-list"><summary>本页批注 · {annotations.filter(item=>item.page===current).length}</summary><div>{annotations.filter(item=>item.page===current).map(item=><button type="button" key={item.id} onClick={()=>onOpenAnnotation?.(item.id,item.page)}>{item.label}</button>)}</div></details>}
       <div><button aria-pressed={mode==='text'} onClick={()=>setMode('text')}><TextSelect size={16}/>选文字</button>
       <button aria-pressed={mode==='crop'} onClick={()=>setMode('crop')}><Scan size={16}/>框选图片</button>
+      </div>
+      <details className="reader-display" onKeyDown={event=>{if(event.key==='Escape'&&event.currentTarget.open){event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}>
+      <summary>显示</summary><div>
       <button aria-pressed={layout==='continuous'} onClick={()=>setLayout('continuous')}>连续</button>
       <button aria-pressed={layout==='single'} onClick={()=>setLayout('single')}>单页</button>
       <button aria-label="缩小" disabled={zoom<=0.75} onClick={()=>setZoom(z=>Math.max(.75,z-.25))}><ZoomOut size={17}/></button>
       <button aria-label="放大" disabled={zoom>=2} onClick={()=>setZoom(z=>Math.min(2,z+.25))}><ZoomIn size={17}/></button></div>
+      </details>
     </div>
     {error && <div className="reader-error" role="alert">{error} <button onClick={()=>setRevision(r=>r+1)}>重新加载</button></div>}
     <div className="reader-scroll" data-layout={layout} ref={scroll} tabIndex={0} role="region" aria-label="讲义页面" onScroll={syncScroll} onWheel={stopRestoring} onTouchStart={stopRestoring} onPointerDown={stopRestoring}

@@ -5,6 +5,7 @@ import { ArrowRight, BookOpen, ChevronRight, FileText, FolderOpen, History, More
 import type { Discussion, StudyDoc } from '../lib/workspace-model';
 import './study-home.css';
 import { readProgress, subscribeReadingProgress } from './reading-progress';
+import PaperLeaves from './PaperLeaves';
 
 export type StudyHomeProps = {
   docs: StudyDoc[];
@@ -14,6 +15,10 @@ export type StudyHomeProps = {
   threads?: Discussion[];
   onOpenDoc: (doc: StudyDoc, page?: number, threadId?: string) => void;
   onMoveDoc: (doc: StudyDoc) => void;
+  onPinDoc: (doc: StudyDoc) => void;
+  onRemoveDoc: (doc: StudyDoc) => void;
+  active: boolean;
+  backgroundPaused: boolean;
   onImport: (course?: string) => void;
   onSample?: () => void;
   onOpenMemory?: (project:string) => void;
@@ -26,12 +31,21 @@ function dateLabel(value?: number) {
 }
 const title = (doc: StudyDoc) => doc.name.replace(/\.(pdf|pptx)$/i, '');
 
-export default function StudyHome({ docs, savedProjects = [], onCreateProject, onManageProject, onMoveDoc, threads = [], onOpenDoc, onImport, onSample, onOpenMemory, loading = false, error }: StudyHomeProps) {
+export default function StudyHome({ docs, savedProjects = [], onCreateProject, onManageProject, onMoveDoc, onPinDoc, onRemoveDoc, active, backgroundPaused, threads = [], onOpenDoc, onImport, onSample, onOpenMemory, loading = false, error }: StudyHomeProps) {
   const [query, setQuery] = useState('');
   const [project, setProject] = useState<string | null>(null);
   const [mobileProjects, setMobileProjects] = useState(false);
+  const projectTrigger=useRef<HTMLButtonElement>(null);
+  const projectClose=useRef<HTMLButtonElement>(null);
   const [sort, setSort] = useState<'recent' | 'name'>('recent');
   const searchId = useId();
+  const searchDialog=useRef<HTMLDialogElement>(null);
+  const searchButton=useRef<HTMLButtonElement>(null);
+  const searchInput=useRef<HTMLInputElement>(null);
+  const returningToSearch=useRef(false);
+  const [searching,setSearching]=useState(false);
+  const [searchAll,setSearchAll]=useState(false);
+  const [composing,setComposing]=useState(false);
   const [name,setName]=useState('');
   const [creating,setCreating]=useState(false);
   const [createError,setCreateError]=useState('');
@@ -101,20 +115,51 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
   }));
   const recent=ordered.find(doc=>checkpoints.has(doc.id));
   const recentPage=recent?checkpoints.get(recent.id):null;
-  const visible = ordered.filter(doc => (activeProject === null || doc.course === activeProject) && (!search ||
-    `${doc.name} ${doc.course}`.toLocaleLowerCase().includes(search) || threads.some(thread => thread.docId === doc.id && thread.messages.some(message => message.role === 'user' && message.content.toLocaleLowerCase().includes(search)))));
-  const matchingProjects=activeProject===null?projects.filter(name=>name.toLocaleLowerCase().includes(search)):[];
-  const recentDocs=visible.filter(doc=>!!doc.visited).slice(0,5);
+  const visible = ordered.filter(doc=>activeProject===null||doc.course===activeProject);
+  const searchScope=searchAll?null:activeProject;
+  const matchingProjects=search?projects.filter(name=>(searchScope===null||name===searchScope)&&name.toLocaleLowerCase().includes(search)):[];
+  const matchingDocs=search?ordered.filter(doc=>(searchScope===null||doc.course===searchScope)&&doc.name.toLocaleLowerCase().includes(search)):[];
+  const documentsById=new Map(ordered.map(doc=>[doc.id,doc]));
+  const matchingQuestions=search?threads.flatMap(thread=>{
+    const doc=documentsById.get(thread.docId);
+    if(!doc||(searchScope!==null&&searchScope!==doc.course))return [];
+    return thread.messages.flatMap((message,index)=>message.role==='user'&&message.content.toLocaleLowerCase().includes(search)?[{doc,thread,message,index}]:[]);
+  }):[];
+  const recentDocs=ordered.slice(0,5);
   const sortedVisible = sort === 'name'
     ? [...visible].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }) || a.id.localeCompare(b.id))
-    : visible;
-  const openDocument = (doc: StudyDoc) => onOpenDoc(doc);
+    : [...visible].sort((a,b)=>Number(b.pinned??false)-Number(a.pinned??false));
+
+  function openSearchResult(doc:StudyDoc,page?:number,threadId?:string){
+    returningToSearch.current=true;
+    searchDialog.current?.close();
+    onOpenDoc(doc,page,threadId);
+  }
+  function closeProjects(){setMobileProjects(false);projectTrigger.current?.focus();}
+
+  useEffect(()=>{
+    if(!active)return;
+    const open=()=>{
+      const dialog=searchDialog.current;
+      if(dialog&&!dialog.open){dialog.showModal();searchInput.current?.focus();setSearching(true);}
+    };
+    if(returningToSearch.current){returningToSearch.current=false;open();}
+    function shortcut(event:KeyboardEvent){
+      if(!event.isComposing&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'&&!document.querySelector('dialog[open]')){
+        event.preventDefault();
+        open();
+      }
+    }
+    window.addEventListener('keydown',shortcut);
+    return ()=>window.removeEventListener('keydown',shortcut);
+  },[active]);
 
   return <section className="study-home" aria-label="学习项目首页" aria-busy={loading}>
-    {mobileProjects&&<button type="button" className="sh-project-backdrop" aria-label="关闭项目目录" onClick={()=>setMobileProjects(false)}/>}
-    <aside className={`sh-sidebar${mobileProjects?' is-open':''}`} aria-label="项目导航">
+    <PaperLeaves active={active&&activeProject===null} paused={backgroundPaused||searching}/>
+    {mobileProjects&&<button type="button" className="sh-project-backdrop" tabIndex={-1} aria-label="关闭项目目录" onClick={closeProjects}/>}
+    <aside id="home-projects" className={`sh-sidebar${mobileProjects?' is-open':''}`} aria-label="项目导航" onKeyDown={event=>{if(event.key==='Escape'&&mobileProjects)closeProjects();}}>
       <div className="sh-space"><span className="sh-space-icon"><BookOpen size={20} /></span><div><strong>我的学习空间</strong></div></div>
-      <div className="sh-project-drawer-heading"><strong>我的项目</strong><button type="button" aria-label="关闭项目目录" onClick={()=>setMobileProjects(false)}><X size={18}/></button></div>
+      <div className="sh-project-drawer-heading"><strong>我的项目</strong><button ref={projectClose} type="button" aria-label="关闭项目目录" onClick={closeProjects}><X size={18}/></button></div>
       <button type="button" className="sh-nav-item" aria-current={activeProject === null ? 'page' : undefined} onClick={() => {setProject(null);setMobileProjects(false)}}><FolderOpen size={18} /><span>全部项目</span><small>{projects.length}</small></button>
       <div className="sh-project-heading">
         <span>我的项目</span>
@@ -176,40 +221,58 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
       </form>}
     </dialog>
     <div className="sh-main">
-      <header className="sh-header"><h1>{activeProject ?? '学习首页'}</h1><div className="sh-header-actions"><button type="button" className="sh-project-switch" aria-expanded={mobileProjects} onClick={()=>setMobileProjects(true)}><FolderOpen size={16}/>{activeProject??'全部项目'}</button><button type="button" className="sh-primary" onClick={() => onImport(activeProject ?? undefined)}><Plus size={17} />导入资料</button></div></header>
+      <header className="sh-header"><h1>{activeProject ?? '学习首页'}</h1><div className="sh-header-actions">
+        <button ref={projectTrigger} type="button" className="sh-project-switch" aria-controls="home-projects" aria-expanded={mobileProjects} onClick={()=>{setMobileProjects(true);requestAnimationFrame(()=>projectClose.current?.focus());}}><FolderOpen size={16}/>{activeProject??'全部项目'}</button>
+        <button ref={searchButton} type="button" className="sh-search-trigger" aria-label="搜索资料库" aria-haspopup="dialog" onClick={()=>{setSearchAll(false);searchDialog.current?.showModal();searchInput.current?.focus();setSearching(true);}}><Search size={17}/><span>搜索</span></button>
+        <button type="button" className="sh-primary" onClick={()=>onImport(activeProject??undefined)}><Plus size={17}/>导入资料</button>
+      </div></header>
       {error && <div className="sh-error" role="alert"><strong>资料暂时未能完整载入</strong><span>{error}</span><span>请刷新页面后重试。</span></div>}
       {loading ? <div className="sh-loading" role="status"><BookOpen size={26} /><p>正在载入你的学习项目…</p></div> : !projects.length ? !error && <div className="sh-empty">
         <span className="sh-empty-icon"><BookOpen size={36} strokeWidth={1.3} /></span><h2>还没有学习资料</h2><p>从右上角导入 PDF 或 PPTX，按课程建立项目。</p><small>单份不超过 20 MiB</small>{onSample && <button type="button" className="sh-sample" onClick={onSample}>打开示例讲义<ArrowRight size={16} /></button>}
       </div> : <>
         {recent && activeProject === null && !search && <section className="sh-resume" aria-labelledby="sh-resume-title"><div className="sh-resume-body"><span className="sh-resume-label"><History size={15} />继续学习</span><p className="sh-resume-course">{recent.course}</p><h2 id="sh-resume-title">{title(recent)}</h2><p><span className="sh-resume-date">上次读到第 {recentPage} 页</span></p><button type="button" onClick={() => onOpenDoc(recent)} className="sh-resume-button">继续阅读<ArrowRight size={17} /></button></div><div className="sh-page-motif" aria-hidden="true"><FileText size={42} strokeWidth={1} /><span>{recent.kind.toUpperCase()}</span></div></section>}
-        <div className="sh-section-heading"><div><h2>{activeProject === null ? '我的项目' : '项目资料'}</h2><span>{activeProject === null ? `${projects.length} 个项目` : `${docs.filter(doc => doc.course === activeProject).length} 份资料`}</span></div><div className="sh-tools">{activeProject&&onOpenMemory&&<button type="button" className="sh-memory-link" onClick={()=>onOpenMemory(activeProject)}>复习主题</button>}<label className="sh-search" htmlFor={searchId}><Search size={17} /><span className="sh-sr-only">搜索项目、资料或提问</span><input id={searchId} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索项目、资料或提问" />{query && <button type="button" aria-label="清除搜索" onClick={() => setQuery('')}><X size={15} /></button>}</label></div></div>
-        {search && <p className="sh-search-status" role="status">{activeProject !== null ? `在「${activeProject}」中` : '全部项目中'}找到 {visible.length} 份相关资料{matchingProjects.length ? `，${matchingProjects.length} 个项目` : ''}</p>}
-        {search&&matchingProjects.length>0&&<section className="sh-project-search" aria-label="匹配的项目">{activeProject!==null&&<button type="button" onClick={()=>setProject(null)}>搜索全部项目</button>}{matchingProjects.map(name=><button type="button" key={name} onClick={()=>setProject(name)}><FolderOpen size={15}/><span>{name||'未分类项目'}</span><small>{docs.filter(doc=>doc.course===name).length} 份资料</small><ChevronRight size={15}/></button>)}</section>}
-        {!search && activeProject === null && <div className="sh-projects" aria-label="我的项目">{projects.map((name, index) => { const projectDocs = docs.filter(doc => doc.course === name); const ids = new Set(projectDocs.map(doc => doc.id)); const count = threads.filter(thread => ids.has(thread.docId) && thread.messages.length).length; return <button type="button" key={name} className="sh-project-card" onClick={() => setProject(name)}><span className="sh-folder" data-tone={index % 4}><FolderOpen size={20} strokeWidth={1.5} /></span><h3>{name || '未分类项目'}</h3><p>{projectDocs.length} 份资料<span>{count} 条讨论</span></p><span className="sh-project-open">进入项目<ChevronRight size={16} /></span></button>; })}</div>}
-        {(search || activeProject !== null || recentDocs.length>0) && <section className="sh-documents" aria-label={search ? '搜索结果' : activeProject !== null ? '项目资料' : '最近资料'}>
-          {!search && activeProject === null ? <h2>最近阅读</h2> : sortedVisible.length>0 && <div className="sh-document-toolbar"><select className="sh-sort" aria-label="文件排序方式" value={sort} onChange={event => setSort(event.target.value === 'name' ? 'name' : 'recent')}><option value="recent">最近打开</option><option value="name">文件名称</option></select></div>}
-          {(activeProject === null && !search ? recentDocs : sortedVisible).map(doc => {
-            const matches=search?threads.flatMap(thread=>thread.docId===doc.id
-              ?thread.messages.filter(message=>message.role==='user'&&message.content.toLocaleLowerCase().includes(search)).map(message=>({thread,message}))
-              :[]):[];
-            const firstMatch=matches[0];
-            return <div className="sh-material-row" key={doc.id}>
-              <button type="button" className="sh-document" onClick={()=>firstMatch
-                ?onOpenDoc(doc,firstMatch.message.page??firstMatch.thread.page,firstMatch.thread.id)
-                :openDocument(doc)}>
-                <span className="sh-file"><FileText size={20}/><small>{doc.kind.toUpperCase()}</small></span>
-                <span className="sh-document-copy"><strong>{title(doc)}</strong><span>{doc.course}{firstMatch?` · 匹配提问：${firstMatch.message.content}`:''}</span></span>
-                <time>{dateLabel(doc.visited)}</time><ChevronRight size={17}/>
-              </button>
-              {matches.length>1&&<details className="sh-search-matches"><summary>{matches.length} 条提问命中</summary><div>{matches.map(({thread,message},index)=><button type="button" key={`${thread.id}-${message.createdAt??index}`} onClick={()=>onOpenDoc(doc,message.page??thread.page,thread.id)}><span>{message.content}</span><small>第 {message.page??thread.page} 页</small></button>)}</div></details>}
-              {doc.id!=='sample'&&<details className="sh-project-menu" name="study-material-actions">
-            <summary aria-label={`整理 ${doc.name}`}><MoreHorizontal size={17} aria-hidden="true"/></summary>
-            <div className="sh-project-actions"><button type="button" onClick={event=>{event.currentTarget.closest('details')?.removeAttribute('open');onMoveDoc(doc);}}>移动到项目</button></div>
-          </details>}</div>; })}
-        </section>}
-        {!visible.length && !search && activeProject!==null && <div className="sh-no-results"><FolderOpen size={25} /><h3>这个项目还没有资料</h3><button type="button" onClick={()=>onImport(activeProject)}>导入第一份资料</button></div>}
-        {!visible.length && search && <div className="sh-no-results"><Search size={25} /><h3>没有找到相关资料</h3><p>试试课程名、文件名，或曾经提问中的关键词。</p><button type="button" onClick={() => setQuery('')}>清除搜索</button>{activeProject !== null && <button type="button" onClick={() => setProject(null)}>搜索全部项目</button>}</div>}
+        <section className="sh-documents" aria-label={activeProject === null ? '最近资料' : '项目资料'}>
+          <div className="sh-document-toolbar"><h2>{activeProject === null ? '最近资料' : '项目资料'}</h2>{activeProject!==null&&<><button type="button" className="sh-memory-link" onClick={()=>onOpenMemory?.(activeProject)}>复习主题</button><select className="sh-sort" aria-label="文件排序方式" value={sort} onChange={event=>setSort(event.target.value==='name'?'name':'recent')}><option value="recent">最近活动</option><option value="name">文件名称</option></select></>}</div>
+          {(activeProject === null ? recentDocs : sortedVisible).map(doc => <div className="sh-material-row" key={doc.id}>
+            <button type="button" className="sh-document" title={doc.name} onClick={()=>onOpenDoc(doc)}>
+              <span className="sh-file"><FileText size={20}/><small>{doc.kind.toUpperCase()}</small></span>
+              <span className="sh-document-copy"><strong>{title(doc)}</strong><span>{doc.course}{checkpoints.has(doc.id)?` · 第 ${checkpoints.get(doc.id)} 页`:''}</span></span>
+              <time>{dateLabel(doc.visited)}</time><ChevronRight size={17}/>
+            </button>
+            <details className="sh-project-menu" name="study-material-actions">
+              <summary aria-label={`整理 ${doc.name}`}><MoreHorizontal size={17} aria-hidden="true"/></summary>
+              <div className="sh-project-actions">
+                <button type="button" onClick={event=>{event.currentTarget.closest('details')?.removeAttribute('open');onMoveDoc(doc);}}>移动到项目</button>
+                <button type="button" onClick={event=>{event.currentTarget.closest('details')?.removeAttribute('open');onPinDoc(doc);}}>{doc.pinned?'取消置顶':'置顶'}</button>
+                <button type="button" onClick={event=>{event.currentTarget.closest('details')?.removeAttribute('open');onRemoveDoc(doc);}}>删除</button>
+              </div>
+            </details>
+          </div>)}
+        </section>
+        {!visible.length && activeProject!==null && <div className="sh-no-results"><FolderOpen size={25}/><h3>这个项目还没有资料</h3><button type="button" onClick={()=>onImport(activeProject)}>导入第一份资料</button></div>}
       </>}
     </div>
+    <dialog ref={searchDialog} className="sh-search-dialog" aria-labelledby={searchId+'-title'}
+      onClose={()=>{setSearching(false);if(active)searchButton.current?.focus();}}
+      onKeyDown={event=>{if(event.key==='Escape'&&!event.nativeEvent.isComposing){event.preventDefault();searchDialog.current?.close();}}}
+      onClick={event=>{if(event.target===event.currentTarget)searchDialog.current?.close();}}>
+      <div className="sh-search-sheet">
+        <header><h2 id={searchId+'-title'}>搜索资料库</h2><button type="button" aria-label="关闭搜索" onClick={()=>searchDialog.current?.close()}><X size={18}/></button></header>
+        <div className="sh-search-tools">
+          <label className="sh-search" htmlFor={searchId}><Search size={17}/><span className="sh-sr-only">搜索项目、资料或提问</span>
+            <input ref={searchInput} id={searchId} type="search" autoFocus value={query} placeholder="搜索项目、资料或提问"
+              onCompositionStart={()=>setComposing(true)} onCompositionEnd={()=>setComposing(false)} onChange={event=>setQuery(event.target.value)}/>
+            {query&&<button type="button" aria-label="清除搜索" onClick={()=>{setQuery('');searchInput.current?.focus();}}><X size={16}/></button>}
+          </label>
+          {activeProject!==null&&<select aria-label="搜索范围" value={searchAll?'all':'project'} onChange={event=>setSearchAll(event.target.value==='all')}><option value="project">当前项目</option><option value="all">全部项目</option></select>}
+        </div>
+        {search&&!composing&&<div className="sh-search-results">
+          {matchingProjects.length>0&&<section><h3>项目</h3>{matchingProjects.map(name=><button type="button" key={name} onClick={()=>{setProject(name);searchDialog.current?.close();}}><FolderOpen size={16}/>{name||'未分类项目'}</button>)}</section>}
+          {matchingDocs.length>0&&<section><h3>资料</h3>{matchingDocs.map(doc=><button type="button" key={doc.id} title={doc.name} onClick={()=>openSearchResult(doc)}><span>{title(doc)}</span><small>{doc.course} · {doc.kind.toUpperCase()}</small></button>)}</section>}
+          {matchingQuestions.length>0&&<section><h3>提问</h3>{matchingQuestions.map(({doc,thread,message,index})=><button type="button" key={`${thread.id}-${index}`} onClick={()=>openSearchResult(doc,message.page??thread.page,thread.id)}><span>{message.content}</span><small>{title(doc)} · 第 {message.page??thread.page} 页</small></button>)}</section>}
+          {!matchingProjects.length&&!matchingDocs.length&&!matchingQuestions.length&&<p role="status">没有找到匹配的项目、资料或提问。</p>}
+        </div>}
+      </div>
+    </dialog>
   </section>;
 }
