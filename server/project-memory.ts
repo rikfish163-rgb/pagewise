@@ -43,7 +43,7 @@ export class ProjectMemory {
   async topics(course:string):Promise<TopicCard[]> {
     const query=`
       SELECT e.thread_id AS threadId, e.topic_key AS topicKey, e.topic, e.detail, e.kind,
-        e.asked_at AS askedAt, d.name AS file,
+        e.asked_at AS askedAt, d.id AS documentId, d.name AS file,
         COALESCE(json_extract(t.messages,'$['||(e.turn-1)||'].page'),t.page) AS page,
         json_extract(t.messages,'$['||(e.turn-1)||'].content') AS question,
         EXISTS(SELECT 1 FROM study_mastery m WHERE m.owner=e.owner AND m.thread_id=t.id
@@ -61,7 +61,7 @@ export class ProjectMemory {
     const decided=new Set<string>();
     for(const row of stored.results){
       const pages=evidencePages(row.question,row.page);
-      const evidence:Evidence={pages,threadId:row.threadId,file:row.file,page:pages[0],question:row.question,askedAt:row.askedAt,detail:row.detail,kind:row.kind};
+      const evidence:Evidence={pages,documentId:row.documentId,threadId:row.threadId,file:row.file,page:pages[0],question:row.question,askedAt:row.askedAt,detail:row.detail,kind:row.kind};
       const card=groups.get(row.topicKey)??{key:row.topicKey,topic:row.topic,stage:'practice',count:0,evidence:[]};
       groups.set(row.topicKey,card);
       card.count++;

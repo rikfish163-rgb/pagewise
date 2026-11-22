@@ -2,6 +2,7 @@ export type MemoryKind = 'gap' | 'practice' | 'progress';
 export type MemoryStage = 'review' | 'practice' | 'mastered';
 
 export type Evidence = {
+  documentId?: string;
   threadId: string;
   file: string;
   page: number;

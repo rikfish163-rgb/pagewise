@@ -1,5 +1,7 @@
 'use client';
 
+import {BookOpen, CircleCheck, FileText, PencilLine, RotateCcw} from 'lucide-react';
+import './project-memory.css';
 import {creditNumber} from './useStudyCredits';
 import {useEffect,useState} from 'react';
 import {evidencePageLabel, stageLabels, type Evidence, type MemoryStage, type ProjectMemoryView, type TopicCard} from '../lib/learning-memory';
@@ -27,6 +29,33 @@ type Props = {
   openSource:(source:Evidence)=>void;
   startReview:(card:TopicCard)=>void;
 };
+
+const stageIcons = {review: RotateCcw, practice: PencilLine, mastered: CircleCheck};
+
+function SourceList({evidence, openSource}: {evidence: Evidence[]; openSource: Props['openSource']}) {
+  const files = new Map<string, {name: string; pages: Map<number, Evidence>}>();
+  for (const source of evidence) {
+    const id = source.documentId ?? source.threadId;
+    const file = files.get(id) ?? {name: source.file, pages: new Map<number, Evidence>()};
+    for (const page of source.pages?.length ? source.pages : [source.page]) {
+      if (!file.pages.has(page)) file.pages.set(page, source);
+    }
+    files.set(id, file);
+  }
+  return <div className="memory-sources">
+    <p className="sources-label"><BookOpen size={14} aria-hidden="true"/>来源讲义</p>
+    <ul>{Array.from(files, ([id, file]) => <li key={id}>
+      <FileText size={15} aria-hidden="true"/>
+      <div>
+        <span className="source-name">{file.name}</span>
+        <div className="source-pages">{Array.from(file.pages.keys()).sort((a,b)=>a-b).map(page =>
+          <button type="button" key={page} aria-label={`查看 ${file.name} 第 ${page} 页`}
+            onClick={()=>openSource({...file.pages.get(page)!, page})}>第 {page} 页</button>
+        )}</div>
+      </div>
+    </li>)}</ul>
+  </div>;
+}
 
 export default function ProjectMemory(props:Props){
   const {course,revision,load,analyze,automatic,canAnalyze,run}=props;
@@ -102,16 +131,16 @@ export default function ProjectMemory(props:Props){
     {cards.length>0&&visible.length===0&&<p className="empty-memory">没有匹配的主题。</p>}
     {stages.map(stage=>{
       const group=visible.filter(card=>card.stage===stage);
+      const StageIcon=stageIcons[stage];
       return group.length>0&&<section key={stage} className="memory-stage" aria-label={stageLabels[stage]}>
-        <h3><span data-stage={stage}/>{stageLabels[stage]}</h3>
+
         {group.map(card=>{
           const focus=(stage==='review'?card.evidence.find(source=>source.kind==='gap'):null)??card.evidence[0];
-          return <article className="learning-card" key={card.key}>
-            <h4>{card.topic}</h4>
+          return <article className="learning-card" data-stage={stage} key={card.key}>
+            <span className="memory-stage-label"><StageIcon size={14} aria-hidden="true"/>{stageLabels[stage]}</span>
+            <h3>{card.topic}</h3>
             <p>{focus.detail}</p>
-            <button type="button" className="memory-source" title={focus.question} onClick={()=>props.openSource(focus)}>
-              <span>{focus.file} · {evidencePageLabel(focus)}</span><span>回看</span>
-            </button>
+            <SourceList evidence={card.evidence} openSource={props.openSource}/>
             <details className="learning-evidence">
               <summary>提问记录{card.count>1?' · '+card.count:''}</summary>
               {card.evidence.map((source,i)=><div key={source.threadId+i}>
@@ -122,7 +151,7 @@ export default function ProjectMemory(props:Props){
             <div className="learning-actions">
               {stage!=='mastered'&&<button type="button" className="text-button" onClick={()=>props.startReview(card)}>自测一下</button>}
               <button className="memory-status" type="button" aria-pressed={stage==='mastered'} disabled={changing!==null} onClick={()=>void mark(card)}>
-                {stage==='mastered'?'✓ 已掌握 · 撤销':'标记为已掌握'}
+                {stage==='mastered'?'撤销已掌握':'标记为已掌握'}
               </button>
             </div>
           </article>;
