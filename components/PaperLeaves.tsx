@@ -4,6 +4,26 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
 type LeafKind = 'maple' | 'ginkgo' | 'willow' | 'petal' | 'osmanthus' | 'fleck';
 
+export const DEFAULT_LEAF_COUNT = 48;
+export const MIN_LEAF_COUNT = 12;
+export const MAX_LEAF_COUNT = 120;
+
+export const DEFAULT_LEAF_SIZE = 12;
+export const MIN_LEAF_SIZE = 7;
+export const MAX_LEAF_SIZE = 24;
+
+export function clampLeafCount(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_LEAF_COUNT;
+  return Math.round(Math.min(MAX_LEAF_COUNT, Math.max(MIN_LEAF_COUNT, parsed)));
+}
+
+export function clampLeafSize(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_LEAF_SIZE;
+  return Math.round(Math.min(MAX_LEAF_SIZE, Math.max(MIN_LEAF_SIZE, parsed)) * 2) / 2;
+}
+
 const AUTUMN_PALETTES: Record<LeafKind, { base: string; tip: string; vein: string }[]> = {
   maple: [
     { base: '#c4493a', tip: '#9e352a', vein: 'rgba(54, 20, 14, 0.22)' },
@@ -309,6 +329,7 @@ type LeafPhase = 'perched' | 'detach' | 'falling';
 interface SpriteEntry {
   canvas: HTMLCanvasElement;
   halfSize: number;
+  baseRenderSize: number;
 }
 
 interface FallingLeafParticle {
@@ -319,7 +340,7 @@ interface FallingLeafParticle {
   y: number;
   originX: number;
   originY: number;
-  size: number;
+  sizeFactor: number;
   depth: number;
   baseAlpha: number;
   vy: number;
@@ -379,6 +400,14 @@ export default function PaperLeaves() {
     try {
       document.documentElement.dataset.backgroundMotion =
         localStorage.getItem('pagewise:background-motion') === 'off' ? 'off' : 'on';
+      const storedCount = localStorage.getItem('pagewise:leaf-count');
+      const storedSize = localStorage.getItem('pagewise:leaf-size');
+      document.documentElement.dataset.leafCount = String(
+        storedCount != null ? clampLeafCount(storedCount) : DEFAULT_LEAF_COUNT
+      );
+      document.documentElement.dataset.leafSize = String(
+        storedSize != null ? clampLeafSize(storedSize) : DEFAULT_LEAF_SIZE
+      );
     } catch {}
   }, []);
 
@@ -397,6 +426,26 @@ export default function PaperLeaves() {
     let isDark = document.documentElement.dataset.theme === 'dark';
     let motionOff =
       document.documentElement.dataset.backgroundMotion === 'off' || reducedMotionQuery.matches;
+    let targetCount = clampLeafCount(
+      document.documentElement.dataset.leafCount ??
+        (() => {
+          try {
+            return localStorage.getItem('pagewise:leaf-count');
+          } catch {
+            return null;
+          }
+        })()
+    );
+    let avgLeafSize = clampLeafSize(
+      document.documentElement.dataset.leafSize ??
+        (() => {
+          try {
+            return localStorage.getItem('pagewise:leaf-size');
+          } catch {
+            return null;
+          }
+        })()
+    );
 
     const spriteDefs: { kind: LeafKind; paletteIdx: number; seed: number }[] = [
       { kind: 'maple', paletteIdx: 0, seed: 101 },
@@ -425,8 +474,8 @@ export default function PaperLeaves() {
 
     let sprites: SpriteEntry[] = [];
     const buildSprites = (scale: number) => {
-      const baseRenderSize = 28;
-      const box = 42;
+      const baseRenderSize = 36;
+      const box = 54;
       sprites = spriteDefs.map((def) => {
         const off = document.createElement('canvas');
         off.width = Math.round(box * scale);
@@ -442,7 +491,7 @@ export default function PaperLeaves() {
           else if (def.kind === 'osmanthus') drawOsmanthusCluster(octx, baseRenderSize * 0.72, pal, def.seed);
           else drawSukiFleck(octx, baseRenderSize * 0.55, pal, def.seed);
         }
-        return { canvas: off, halfSize: box / 2 };
+        return { canvas: off, halfSize: box / 2, baseRenderSize };
       });
     };
 
@@ -450,11 +499,11 @@ export default function PaperLeaves() {
 
     const createParticle = (
       index: number,
-      totalLeaves: number,
+      totalParticles: number,
       rng: () => number,
-      initialSpawn: boolean
+      mode: 'initial' | 'recycle' | 'live-add'
     ): FallingLeafParticle => {
-      const isFleck = index >= totalLeaves;
+      const isFleck = index % 5 === 4;
       const leafRoll = rng();
       const kind: LeafKind = isFleck
         ? rng() < 0.45 ? 'osmanthus' : 'fleck'
@@ -475,17 +524,17 @@ export default function PaperLeaves() {
       const spriteIndex = matchingSprites[Math.floor(rng() * matchingSprites.length)];
 
       const depth = isFleck ? 0.15 + 0.35 * rng() : Math.pow(rng(), 1.15);
-      const size = isFleck
-        ? 4.4 + 3.4 * rng()
+      const sizeFactor = isFleck
+        ? 0.38 + 0.28 * rng()
         : kind === 'maple'
-          ? 9.8 + depth * 6.8 + (rng() - 0.5) * 1.8
+          ? 0.82 + depth * 0.54 + (rng() - 0.5) * 0.15
           : kind === 'ginkgo'
-            ? 9.2 + depth * 6.2 + (rng() - 0.5) * 1.6
+            ? 0.77 + depth * 0.50 + (rng() - 0.5) * 0.14
             : kind === 'willow'
-              ? 8.8 + depth * 6.0 + (rng() - 0.5) * 1.6
+              ? 0.74 + depth * 0.48 + (rng() - 0.5) * 0.14
               : kind === 'osmanthus'
-                ? 6.5 + depth * 4.2
-                : 7.4 + depth * 4.8;
+                ? 0.54 + depth * 0.34
+                : 0.64 + depth * 0.40;
 
       const baseAlpha = isFleck
         ? 0.20 + 0.22 * depth
@@ -509,29 +558,41 @@ export default function PaperLeaves() {
         xNorm = rng() < 0.5 ? 0.02 + 0.26 * rng() : 0.72 + 0.26 * rng();
       }
       const x = xNorm * Math.max(width, 320);
+      const approxPx = sizeFactor * avgLeafSize;
 
       let phase: LeafPhase = 'falling';
-      let y = -size - 10 - rng() * 36;
+      let y = -approxPx - 10 - rng() * 36;
       let releaseDelay = 0;
       let fadeInDuration = 1.2;
 
-      const perchedQuota = Math.min(18, Math.floor(totalLeaves * 0.38));
-      if (initialSpawn) {
+      const perchedQuota = Math.min(24, Math.max(3, Math.floor(totalParticles * 0.3)));
+      if (mode === 'initial') {
         if (!isFleck && index < perchedQuota) {
           phase = 'perched';
           y = (0.04 + 0.52 * Math.pow(rng(), 1.25)) * Math.max(height, 480);
           releaseDelay = 0.25 + (index / perchedQuota) * 13.5 + rng() * 0.9;
           fadeInDuration = 0.9;
-        } else if (isFleck && index < totalLeaves + 6) {
+        } else if (isFleck && index < Math.min(totalParticles, 18)) {
           y = (0.08 + 0.72 * rng()) * Math.max(height, 480);
-          releaseDelay = (index - totalLeaves) * 0.18;
+          releaseDelay = (index % 6) * 0.18;
           fadeInDuration = 1.2;
         } else {
-          const order = isFleck ? index - totalLeaves : index - perchedQuota;
-          const count = isFleck ? 16 : Math.max(1, totalLeaves - perchedQuota);
+          const order = Math.max(0, index - perchedQuota);
+          const count = Math.max(1, totalParticles - perchedQuota);
           releaseDelay = 0.2 + (order / count) * 14.5 + rng() * 1.1;
-          y = -size - 8 - rng() * 28;
+          y = -approxPx - 8 - rng() * 28;
           fadeInDuration = 1.1;
+        }
+      } else if (mode === 'live-add') {
+        if (rng() < 0.65) {
+          y = (0.05 + 0.78 * rng()) * Math.max(height, 480);
+          releaseDelay = rng() * 0.25;
+          fadeInDuration = 0.55;
+        } else {
+          phase = 'perched';
+          y = (0.04 + 0.42 * rng()) * Math.max(height, 480);
+          releaseDelay = 0.4 + rng() * 3.2;
+          fadeInDuration = 0.55;
         }
       } else {
         if (!isFleck && rng() < 0.22) {
@@ -541,7 +602,7 @@ export default function PaperLeaves() {
           fadeInDuration = 0.9;
         } else {
           releaseDelay = rng() * 0.5;
-          y = -size - 8 - rng() * 24;
+          y = -approxPx - 8 - rng() * 24;
         }
       }
 
@@ -553,7 +614,7 @@ export default function PaperLeaves() {
         y,
         originX: x,
         originY: y,
-        size,
+        sizeFactor,
         depth,
         baseAlpha,
         vy,
@@ -575,6 +636,32 @@ export default function PaperLeaves() {
       };
     };
 
+    const recycleRng = createRng(918273);
+
+    const syncParticleCount = (desiredTotal: number, initial: boolean) => {
+      if (initial) {
+        const rng = createRng(20261122);
+        particles = Array.from({ length: desiredTotal }, (_, i) =>
+          createParticle(i, desiredTotal, rng, 'initial')
+        );
+        particles.sort((a, b) => a.depth - b.depth);
+        return;
+      }
+      if (particles.length < desiredTotal) {
+        const startLen = particles.length;
+        for (let i = startLen; i < desiredTotal; i++) {
+          particles.push(createParticle(i, desiredTotal, recycleRng, 'live-add'));
+        }
+        particles.sort((a, b) => a.depth - b.depth);
+      } else if (particles.length > desiredTotal) {
+        const excess = particles.length - desiredTotal;
+        for (let r = 0; r < excess; r++) {
+          const removeIdx = Math.floor(((r + 0.5) / excess) * particles.length);
+          particles.splice(Math.min(particles.length - 1, removeIdx), 1);
+        }
+      }
+    };
+
     const initScene = () => {
       const rect = canvas.getBoundingClientRect();
       const nextW = Math.max(1, Math.round(rect.width || window.innerWidth));
@@ -593,15 +680,7 @@ export default function PaperLeaves() {
       canvas.height = Math.round(height * dpr);
 
       if (firstInit) {
-        const rng = createRng(20261122);
-        const isMobile = width < 768;
-        const leafCount = isMobile ? 28 : Math.min(54, Math.max(40, Math.round(width / 28)));
-        const fleckCount = isMobile ? 10 : 18;
-        const total = leafCount + fleckCount;
-        particles = Array.from({ length: total }, (_, i) =>
-          createParticle(i, leafCount, rng, true)
-        );
-        particles.sort((a, b) => a.depth - b.depth);
+        syncParticleCount(targetCount, true);
       }
     };
 
@@ -610,7 +689,6 @@ export default function PaperLeaves() {
 
     let clock = 0;
     let lastTime = performance.now();
-    const recycleRng = createRng(918273);
 
     const renderFrame = (now: number) => {
       if (disposed) return;
@@ -641,6 +719,8 @@ export default function PaperLeaves() {
       for (let i = 0; i < particles.length; i++) {
         const p = particles[i];
         const sprite = sprites[p.spriteIndex];
+        const currentSize = p.sizeFactor * avgLeafSize;
+        const baseSpriteSize = sprite ? sprite.baseRenderSize : 36;
 
         if (p.phase === 'perched') {
           p.elapsed += dt;
@@ -649,7 +729,7 @@ export default function PaperLeaves() {
           const breathe = Math.sin(clock * 1.1 + p.swayPhase);
           const perchedAlpha = p.baseAlpha * 0.46 * themeAlphaMul * fadeIn;
           if (sprite && perchedAlpha > 0.008) {
-            const renderScale = p.size / 28;
+            const renderScale = currentSize / baseSpriteSize;
             ctx.save();
             ctx.globalAlpha = perchedAlpha;
             ctx.translate(
@@ -681,7 +761,7 @@ export default function PaperLeaves() {
           const liftX = p.originX + 2.5 * Math.sin(t * Math.PI * 1.5 + p.swayPhase) * smoothT;
           const liftY = p.originY - 2.2 * Math.sin(t * Math.PI * 0.5);
           const liftAngle = p.baseAngle + 0.08 * Math.sin(t * Math.PI * 3);
-          const liftScale = (p.size / 28) * (1 + 0.06 * smoothT);
+          const liftScale = (currentSize / baseSpriteSize) * (1 + 0.06 * smoothT);
           const liftAlpha = p.baseAlpha * (0.46 + 0.54 * smoothT) * themeAlphaMul;
 
           if (sprite && liftAlpha > 0.008) {
@@ -750,7 +830,7 @@ export default function PaperLeaves() {
           const squashX =
             p.flip * (0.28 + 0.72 * Math.abs(Math.cos(flutterT * 0.75)));
           const squashY = 0.78 + 0.22 * Math.sin(flutterT * 0.65 + 0.8);
-          const renderScale = p.size / 28;
+          const renderScale = currentSize / baseSpriteSize;
 
           ctx.save();
           ctx.globalAlpha = alpha;
@@ -770,9 +850,9 @@ export default function PaperLeaves() {
         if (drawY > height + 36 || drawX < -140 || drawX > width + 140) {
           const recycled = createParticle(
             i,
-            particles.filter((item) => item.kind !== 'fleck' && item.kind !== 'osmanthus').length,
+            particles.length,
             recycleRng,
-            false
+            'recycle'
           );
           recycled.depth = p.depth;
           particles[i] = recycled;
@@ -785,15 +865,31 @@ export default function PaperLeaves() {
     const onResize = () => initScene();
     window.addEventListener('resize', onResize);
 
-    const observer = new MutationObserver(() => {
+    const syncPreferences = () => {
       isDark = document.documentElement.dataset.theme === 'dark';
       motionOff =
         document.documentElement.dataset.backgroundMotion === 'off' ||
         reducedMotionQuery.matches;
+      const nextCount = clampLeafCount(document.documentElement.dataset.leafCount);
+      const nextSize = clampLeafSize(document.documentElement.dataset.leafSize);
+      avgLeafSize = nextSize;
+      if (nextCount !== targetCount) {
+        targetCount = nextCount;
+        syncParticleCount(targetCount, false);
+      }
+    };
+
+    const observer = new MutationObserver(() => {
+      syncPreferences();
     });
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['data-theme', 'data-background-motion'],
+      attributeFilter: [
+        'data-theme',
+        'data-background-motion',
+        'data-leaf-count',
+        'data-leaf-size',
+      ],
     });
 
     const onMotionChange = () => {

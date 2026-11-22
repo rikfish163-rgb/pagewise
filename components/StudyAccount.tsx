@@ -1,6 +1,16 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import {
+  clampLeafCount,
+  clampLeafSize,
+  DEFAULT_LEAF_COUNT,
+  DEFAULT_LEAF_SIZE,
+  MAX_LEAF_COUNT,
+  MAX_LEAF_SIZE,
+  MIN_LEAF_COUNT,
+  MIN_LEAF_SIZE,
+} from './PaperLeaves';
 import { useTheme } from './ThemeProvider';
 import { creditNumber, hasPricing, type Pricing } from './useStudyCredits';
 import './study-account.css';
@@ -120,7 +130,36 @@ export default function StudyAccount({ onClose, showAdmin = false, accountSource
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [retryCursors, setRetryCursors] = useState<(string | null)[]>([null]);
-  const backgroundMotion = useRef<HTMLInputElement>(null);
+  const [leavesEnabled, setLeavesEnabled] = useState(true);
+  const [leafCount, setLeafCount] = useState(DEFAULT_LEAF_COUNT);
+  const [leafSize, setLeafSize] = useState(DEFAULT_LEAF_SIZE);
+
+  function updateLeavesEnabled(enabled: boolean) {
+    setLeavesEnabled(enabled);
+    const value = enabled ? 'on' : 'off';
+    try {
+      localStorage.setItem('pagewise:background-motion', value);
+    } catch {}
+    document.documentElement.dataset.backgroundMotion = value;
+  }
+
+  function updateLeafCount(next: number) {
+    const clamped = clampLeafCount(next);
+    setLeafCount(clamped);
+    try {
+      localStorage.setItem('pagewise:leaf-count', String(clamped));
+    } catch {}
+    document.documentElement.dataset.leafCount = String(clamped);
+  }
+
+  function updateLeafSize(next: number) {
+    const clamped = clampLeafSize(next);
+    setLeafSize(clamped);
+    try {
+      localStorage.setItem('pagewise:leaf-size', String(clamped));
+    } catch {}
+    document.documentElement.dataset.leafSize = String(clamped);
+  }
 
   async function load(target: (string | null)[] = [null], focusLedger = false) {
     request.current?.abort();
@@ -154,9 +193,19 @@ export default function StudyAccount({ onClose, showAdmin = false, accountSource
   }
 
   useEffect(() => {
-    const enabled = localStorage.getItem('pagewise:background-motion') !== 'off';
-    if (backgroundMotion.current) backgroundMotion.current.checked = enabled;
-    document.documentElement.dataset.backgroundMotion = enabled ? 'on' : 'off';
+    try {
+      const enabled = localStorage.getItem('pagewise:background-motion') !== 'off';
+      const storedCount = localStorage.getItem('pagewise:leaf-count');
+      const storedSize = localStorage.getItem('pagewise:leaf-size');
+      const resolvedCount = storedCount != null ? clampLeafCount(storedCount) : DEFAULT_LEAF_COUNT;
+      const resolvedSize = storedSize != null ? clampLeafSize(storedSize) : DEFAULT_LEAF_SIZE;
+      setLeavesEnabled(enabled);
+      setLeafCount(resolvedCount);
+      setLeafSize(resolvedSize);
+      document.documentElement.dataset.backgroundMotion = enabled ? 'on' : 'off';
+      document.documentElement.dataset.leafCount = String(resolvedCount);
+      document.documentElement.dataset.leafSize = String(resolvedSize);
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -193,9 +242,59 @@ export default function StudyAccount({ onClose, showAdmin = false, accountSource
           {([['system', '跟随系统'], ['light', '浅色'], ['dark', '深色']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={theme === value} onClick={() => setTheme(value)}>{label}</button>)}
         </div>
       </section>
-      <section className="study-account__appearance" aria-labelledby="study-account-background">
-        <div><h3 id="study-account-background">背景动效</h3><p>在首页和项目页显示缓缓飘落的秋叶。</p></div>
-        <label className="study-account__switch"><input ref={backgroundMotion} type="checkbox" defaultChecked onChange={event => {const enabled=event.currentTarget.checked;localStorage.setItem('pagewise:background-motion',enabled?'on':'off');document.documentElement.dataset.backgroundMotion=enabled?'on':'off';}}/><span>显示叶片</span></label>
+      <section className="study-account__appearance study-account__appearance--leaves" aria-labelledby="study-account-background">
+        <div className="study-account__appearance-head">
+          <div><h3 id="study-account-background">背景动效</h3><p>在首页和项目页显示缓缓飘落的秋叶，可调整叶片数量与平均大小。</p></div>
+          <label className="study-account__switch"><input type="checkbox" checked={leavesEnabled} onChange={event => updateLeavesEnabled(event.currentTarget.checked)}/><span>显示叶片</span></label>
+        </div>
+        <div className={`study-account__leaf-controls${leavesEnabled ? '' : ' is-disabled'}`} aria-label="秋叶参数调节">
+          <label className="study-account__range-row">
+            <span className="study-account__range-label">
+              <span>叶片数量</span>
+              <strong>{leafCount} 片</strong>
+            </span>
+            <input
+              type="range"
+              min={MIN_LEAF_COUNT}
+              max={MAX_LEAF_COUNT}
+              step={2}
+              value={leafCount}
+              disabled={!leavesEnabled}
+              aria-label="叶片数量"
+              onChange={event => updateLeafCount(Number(event.currentTarget.value))}
+            />
+          </label>
+          <label className="study-account__range-row">
+            <span className="study-account__range-label">
+              <span>叶片平均大小</span>
+              <strong>{leafSize} px</strong>
+            </span>
+            <input
+              type="range"
+              min={MIN_LEAF_SIZE}
+              max={MAX_LEAF_SIZE}
+              step={0.5}
+              value={leafSize}
+              disabled={!leavesEnabled}
+              aria-label="叶片平均大小"
+              onChange={event => updateLeafSize(Number(event.currentTarget.value))}
+            />
+          </label>
+          {(leafCount !== DEFAULT_LEAF_COUNT || leafSize !== DEFAULT_LEAF_SIZE) && (
+            <div className="study-account__leaf-reset">
+              <button
+                type="button"
+                disabled={!leavesEnabled}
+                onClick={() => {
+                  updateLeafCount(DEFAULT_LEAF_COUNT);
+                  updateLeafSize(DEFAULT_LEAF_SIZE);
+                }}
+              >
+                恢复默认（{DEFAULT_LEAF_COUNT} 片 · {DEFAULT_LEAF_SIZE} px）
+              </button>
+            </div>
+          )}
+        </div>
       </section>
       <nav className="study-account__auth" aria-label="账户操作">
         <a href="/login">登录方式</a>
