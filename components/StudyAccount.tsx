@@ -194,7 +194,7 @@ export default function StudyAccount({ onClose, showAdmin = false, accountSource
         </div>
       </section>
       <section className="study-account__appearance" aria-labelledby="study-account-background">
-        <div><h3 id="study-account-background">背景动效</h3><p>在首页和项目页显示缓慢的叶片。</p></div>
+        <div><h3 id="study-account-background">背景动效</h3><p>在首页和项目页显示缓缓飘落的秋叶。</p></div>
         <label className="study-account__switch"><input ref={backgroundMotion} type="checkbox" defaultChecked onChange={event => {const enabled=event.currentTarget.checked;localStorage.setItem('pagewise:background-motion',enabled?'on':'off');document.documentElement.dataset.backgroundMotion=enabled?'on':'off';}}/><span>显示叶片</span></label>
       </section>
       <nav className="study-account__auth" aria-label="账户操作">
