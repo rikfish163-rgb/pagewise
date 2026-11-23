@@ -106,3 +106,43 @@ export const studyProjects = sqliteTable('study_projects', {
   owner: text('owner').notNull(),
   name: text('name').notNull(),
 }, t => [primaryKey({columns:[t.owner,t.name]})]);
+
+export const studyNotes = sqliteTable('study_notes', {
+  id: text('id').primaryKey(),
+  owner: text('owner').notNull(),
+  number: integer('number').notNull(),
+  title: text('title').notNull(),
+  body: text('body').notNull().default(''),
+  revision: integer('revision').notNull().default(1),
+  writeToken: text('write_token').notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, t => [
+  uniqueIndex('study_notes_owner_number').on(t.owner, t.number),
+  index('study_notes_owner_updated').on(t.owner, t.updatedAt),
+  check('study_notes_number_positive', sql`${t.number} BETWEEN 1 AND 999999999`),
+  check('study_notes_revision_positive', sql`${t.revision} > 0`),
+]);
+
+export const studyNoteCounters = sqliteTable('study_note_counters', {
+  owner: text('owner').primaryKey(),
+  lastNumber: integer('last_number').notNull().default(0),
+});
+
+// Source snapshots survive deleting a document or discussion. Their current
+// ownership and availability are checked again whenever a note is read or saved.
+export const studyNoteSources = sqliteTable('study_note_sources', {
+  noteId: text('note_id').notNull().references(() => studyNotes.id, {onDelete:'cascade'}),
+  key: text('source_key').notNull(),
+  owner: text('owner').notNull(),
+  project: text('project').notNull(),
+  docId: text('doc_id'),
+  documentName: text('document_name'),
+  threadId: text('thread_id'),
+  discussionTitle: text('discussion_title'),
+  page: integer('page'),
+}, t => [
+  primaryKey({columns:[t.noteId, t.key]}),
+  index('study_note_sources_owner_thread').on(t.owner, t.threadId),
+  index('study_note_sources_owner_project').on(t.owner, t.project),
+]);
