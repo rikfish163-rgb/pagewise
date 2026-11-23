@@ -16,6 +16,8 @@ The desktop pairs an adjustable discussion margin with a flexible document stage
 - Upload requires a course and PDF/PPTX. Delete confirms its actual cascading effect. API errors stay visible in the relevant discussion or dialog.
 - Keyboard focus, readable labels, reduced motion and mobile reading are supported. No credential is requested in the browser.
 - Pagewise drafts preserve their document and discussion ownership. Opening a citation restores the originating reader location. Saving a notebook displays the confirmed server status.
+- The notebook uses a left index and a quiet writing surface with the existing paper, ink, warm red, muted text and border tokens. Note numbers identify real records; they are editable positive integers unique to the current account. The full notebook filters across projects and discussions, while the reading margin uses a compact note switcher.
+- Each note keeps its own unsaved edits and server revision. One note may have several project or discussion sources. Moving or renaming a project updates those sources; removing a source document or discussion preserves the note and its source description. The old single notebook becomes “原学习笔记”.
 
 ## Initial audit and acceptance
 

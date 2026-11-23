@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
-import { ArrowRight, BookOpen, ChevronRight, FileText, FolderOpen, History, MoreHorizontal, Plus, Search, X } from 'lucide-react';
+import { ArrowRight, BookOpen, ChevronRight, FileText, FolderOpen, History, MoreHorizontal, NotebookPen, Plus, Search, X } from 'lucide-react';
 import type { Discussion, StudyDoc } from '../lib/workspace-model';
 import './study-home.css';
 import { readProgress, subscribeReadingProgress } from './reading-progress';
@@ -22,6 +22,7 @@ export type StudyHomeProps = {
   onImport: (course?: string) => void;
   onSample?: () => void;
   onOpenMemory?: (project:string) => void;
+  onOpenNotebook?: (project?:string) => void;
   loading?: boolean;
   error?: string;
 };
@@ -31,7 +32,7 @@ function dateLabel(value?: number) {
 }
 const title = (doc: StudyDoc) => doc.name.replace(/\.(pdf|pptx)$/i, '');
 
-export default function StudyHome({ docs, savedProjects = [], onCreateProject, onManageProject, onMoveDoc, onPinDoc, onRemoveDoc, active, backgroundPaused, threads = [], onOpenDoc, onImport, onSample, onOpenMemory, loading = false, error }: StudyHomeProps) {
+export default function StudyHome({ docs, savedProjects = [], onCreateProject, onManageProject, onMoveDoc, onPinDoc, onRemoveDoc, active, backgroundPaused, threads = [], onOpenDoc, onImport, onSample, onOpenMemory, onOpenNotebook, loading = false, error }: StudyHomeProps) {
   const [query, setQuery] = useState('');
   const [project, setProject] = useState<string | null>(null);
   const [mobileProjects, setMobileProjects] = useState(false);
@@ -161,6 +162,7 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
       <div className="sh-space"><span className="sh-space-icon"><BookOpen size={20} /></span><div><strong>我的学习空间</strong></div></div>
       <div className="sh-project-drawer-heading"><strong>我的项目</strong><button ref={projectClose} type="button" aria-label="关闭项目目录" onClick={closeProjects}><X size={18}/></button></div>
       <button type="button" className="sh-nav-item" aria-current={activeProject === null ? 'page' : undefined} onClick={() => {setProject(null);setMobileProjects(false)}}><FolderOpen size={18} /><span>全部项目</span><small>{projects.length}</small></button>
+      {onOpenNotebook&&<button type="button" className="sh-nav-item" onClick={()=>{setMobileProjects(false);onOpenNotebook();}}><NotebookPen size={17}/><span>笔记本</span></button>}
       <div className="sh-project-heading">
         <span>我的项目</span>
         <button type="button" className="sh-create" onClick={()=>{setName('');setCreateError('');createDialog.current?.showModal();}}><Plus size={15} aria-hidden="true"/>新建项目</button>
@@ -232,7 +234,7 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
       </div> : <>
         {recent && activeProject === null && !search && <section className="sh-resume" aria-labelledby="sh-resume-title"><div className="sh-resume-body"><span className="sh-resume-label"><History size={15} />继续学习</span><p className="sh-resume-course">{recent.course}</p><h2 id="sh-resume-title">{title(recent)}</h2><p><span className="sh-resume-date">上次读到第 {recentPage} 页</span></p><button type="button" onClick={() => onOpenDoc(recent)} className="sh-resume-button">继续阅读<ArrowRight size={17} /></button></div><div className="sh-page-motif" aria-hidden="true"><FileText size={42} strokeWidth={1} /><span>{recent.kind.toUpperCase()}</span></div></section>}
         <section className="sh-documents" aria-label={activeProject === null ? '最近资料' : '项目资料'}>
-          <div className="sh-document-toolbar"><h2>{activeProject === null ? '最近资料' : '项目资料'}</h2>{activeProject!==null&&<><button type="button" className="sh-memory-link" onClick={()=>onOpenMemory?.(activeProject)}>复习主题</button><select className="sh-sort" aria-label="文件排序方式" value={sort} onChange={event=>setSort(event.target.value==='name'?'name':'recent')}><option value="recent">最近活动</option><option value="name">文件名称</option></select></>}</div>
+          <div className="sh-document-toolbar"><h2>{activeProject === null ? '最近资料' : '项目资料'}</h2>{activeProject!==null&&<>{onOpenNotebook&&<button type="button" className="sh-memory-link" onClick={()=>onOpenNotebook(activeProject)}>项目笔记</button>}<button type="button" className="sh-memory-link" onClick={()=>onOpenMemory?.(activeProject)}>复习主题</button><select className="sh-sort" aria-label="文件排序方式" value={sort} onChange={event=>setSort(event.target.value==='name'?'name':'recent')}><option value="recent">最近活动</option><option value="name">文件名称</option></select></>}</div>
           {(activeProject === null ? recentDocs : sortedVisible).map(doc => <div className="sh-material-row" key={doc.id}>
             <button type="button" className="sh-document" title={doc.name} onClick={()=>onOpenDoc(doc)}>
               <span className="sh-file"><FileText size={20}/><small>{doc.kind.toUpperCase()}</small></span>

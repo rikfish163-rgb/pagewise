@@ -4,6 +4,7 @@ import {holdForOperation,openSiteOperation,runSiteCall,siteReceipt,UnpricedSiteU
 import {makeSearchTask, memoryMatches, memoryPromptData, type ModelTask, type MemorySourceRef} from '../lib/learning-memory.ts';
 import {ProjectMemory, memorySourceRefs} from './project-memory.ts';
 import {notebook,shelf} from './study-organizer.ts';
+import {handleNotes} from './study-notes.ts';
 import {handleProviderSettings,selectedPersonalModel} from './provider-settings.ts';
 import type {probeVision} from './vision-probe.ts';
 import { askPersonal, type probePersonal, checkRuntimeEndpoint, loadProfile, PersonalError, type PersonalProfile } from './personal-api.ts';
@@ -108,6 +109,7 @@ export async function handleStudy(request:Request,path:string[],ctx:Context):Pro
       request=new Request(request.url,{method:request.method,headers:request.headers,body:body as BodyInit});
     }
     if(path.join('/')==='notebook' && ['GET','POST'].includes(request.method))return notebook(request,db,owner);
+    if(path[0]==='notes')return await handleNotes(request,path,db,owner);
     if(path[0]==='personal-api')return await handleProviderSettings(request,path,{bucket,owner,probe:ctx.probe,diagnose:ctx.diagnose});
     if(path[0]==='memory') {
       const payload=request.method==='POST' ? await request.json() as {
@@ -238,7 +240,10 @@ export async function handleStudy(request:Request,path:string[],ctx:Context):Pro
                 AND EXISTS(SELECT 1 FROM study_projects WHERE owner=? AND name=?)
                 ON CONFLICT(owner,name) DO NOTHING`).bind(owner,doc.id,owner,target),
               db.prepare(`UPDATE documents SET course=? WHERE owner=? AND id=?
-                AND EXISTS(SELECT 1 FROM study_projects WHERE owner=? AND name=?)`).bind(target,owner,doc.id,owner,target)
+                AND EXISTS(SELECT 1 FROM study_projects WHERE owner=? AND name=?)`).bind(target,owner,doc.id,owner,target),
+              db.prepare(`UPDATE study_note_sources SET project=? WHERE owner=? AND doc_id=?
+                AND EXISTS(SELECT 1 FROM documents WHERE id=? AND owner=? AND course=?)`)
+                .bind(target,owner,doc.id,doc.id,owner,target)
             ]);
             const changes=updated.meta?.changes??(updated as unknown as {changes:number}).changes;
             if(!changes)return json({error:'资料或目标项目已变更，请刷新后重试。'},409);

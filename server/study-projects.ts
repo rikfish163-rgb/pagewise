@@ -47,6 +47,7 @@ export async function manageProject(db:D1Database,owner:string,input:unknown){
   try{
     await db.batch([sourceGuard,
       db.prepare('UPDATE documents SET course=? WHERE owner=? AND course=?').bind(target,owner,from),
+      db.prepare('UPDATE study_note_sources SET project=? WHERE owner=? AND project=?').bind(target,owner,from),
       db.prepare(`INSERT INTO memory_mastery(owner,course,topic_key)
         SELECT owner,?,topic_key FROM memory_mastery WHERE owner=? AND course=?
         ON CONFLICT(owner,course,topic_key) DO NOTHING`).bind(target,owner,from),

@@ -1,4 +1,5 @@
 import {persistWithCredit} from './learning-credits.ts';
+import {legacyNoteId} from './study-notes.ts';
 type Note = {body:string; revision:number};
 export async function notebook(request:Request,db:D1Database,owner:string) {
   await db.prepare('CREATE TABLE IF NOT EXISTS notebooks (owner TEXT PRIMARY KEY, body TEXT NOT NULL, revision INTEGER NOT NULL)').run();
@@ -7,7 +8,11 @@ export async function notebook(request:Request,db:D1Database,owner:string) {
   if(typeof value.body!=='string'||value.body.length>250000||!Number.isInteger(value.revision))return Response.json({error:'笔记最多 25 万字。'},{status:400});
   const previous=await db.prepare('SELECT body,revision FROM notebooks WHERE owner=?').bind(owner).first<Note>();
   const query=value.revision===0?db.prepare('INSERT OR IGNORE INTO notebooks(owner,body,revision) VALUES(?,?,1)').bind(owner,value.body):db.prepare('UPDATE notebooks SET body=?, revision=revision+1 WHERE owner=? AND revision=?').bind(value.body,owner,value.revision);
-  const saved=await persistWithCredit(db,query,owner,'note_saved','notebook',!!value.body.trim()&&value.body!==previous?.body);
+  const token=crypto.randomUUID();
+  const sync=db.prepare(`UPDATE study_notes SET body=?,revision=?,write_token=?,updated_at=?
+    WHERE id=? AND owner=? AND revision<? AND EXISTS(SELECT 1 FROM notebooks WHERE owner=? AND revision=? AND body=?)`)
+    .bind(value.body,value.revision+1,token,Date.now(),legacyNoteId(owner),owner,value.revision+1,owner,value.revision+1,value.body);
+  const saved=await persistWithCredit(db,query,owner,'note_saved','notebook',!!value.body.trim()&&value.body!==previous?.body,Date.now(),[sync]);
   if(!(saved.meta?.changes??(saved as unknown as {changes:number}).changes))return Response.json({error:'笔记已在其他窗口更新。请先导出当前草稿，再刷新合并。'},{status:409});
   return Response.json({revision:value.revision+1});
 }

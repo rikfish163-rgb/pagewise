@@ -20,14 +20,17 @@ type CreditKind = typeof creditRules[number]['kind'];
 export function studyDate(now:number) {
   return new Date(now+8*60*60*1000).toISOString().slice(0,10);
 }
-/** D1 batch is transactional. changes() refers to the preceding persisted action,
- * so a rejected optimistic write cannot earn a reward, even under concurrency. */
-export async function persistWithCredit(db:D1Database,action:D1PreparedStatement,owner:string,kind:CreditKind,sourceId:string,eligible=true,now=Date.now()) {
+/** Place this immediately after the persisted action in the same D1 batch. */
+export function learningCreditAward(db:D1Database,owner:string,kind:CreditKind,sourceId:string,eligible=true,now=Date.now()) {
   const rule=creditRules.find(rule=>rule.kind===kind)!;
-  const award=db.prepare(`INSERT INTO learning_credits(id,owner,kind,credits,study_date,created_at,source_id)
+  return db.prepare(`INSERT INTO learning_credits(id,owner,kind,credits,study_date,created_at,source_id)
     SELECT ?,?,?,?,?,?,? WHERE changes()>0 AND ?
     ON CONFLICT(owner,study_date,kind) DO NOTHING`).bind(crypto.randomUUID(),owner,kind,rule.credits,studyDate(now),now,sourceId,Number(eligible));
-  const [saved]=await db.batch([action,award]);
+}
+/** D1 batch is transactional. changes() refers to the preceding persisted action,
+ * so a rejected optimistic write cannot earn a reward, even under concurrency. */
+export async function persistWithCredit(db:D1Database,action:D1PreparedStatement,owner:string,kind:CreditKind,sourceId:string,eligible=true,now=Date.now(),following:D1PreparedStatement[] = []) {
+  const [saved]=await db.batch([action,learningCreditAward(db,owner,kind,sourceId,eligible,now),...following]);
   return saved;
 }
 // Pass only SQL expressions, never request data. The directory previews the

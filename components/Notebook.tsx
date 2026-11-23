@@ -1,217 +1,368 @@
 'use client';
-import {useCallback,useEffect,useMemo,useRef,useState,type CSSProperties,type KeyboardEvent as ReactKeyboardEvent} from 'react';
-import { Bold, Check, ChevronDown, ChevronLeft, ChevronRight, Ellipsis, Eye, FileText, Highlighter, List, Maximize2, PencilLine, Sigma, SpellCheck, SplitSquareVertical } from 'lucide-react';
-import {DropdownMenu} from 'radix-ui';
-import {notebookNavigation} from '../lib/markdown';
-import './notebook.css';
-import MarkdownAnswer from './MarkdownAnswer';
-import type {LucideIcon} from 'lucide-react';
 
-const fontFamilies: Record<string,string> = {
- '系统黑体': 'system-ui, "Microsoft YaHei", "PingFang SC", sans-serif',
- '霞鹜文楷': 'var(--wenkai), KaiTi, serif',
- '宋体': '"Songti SC", SimSun, "Noto Serif CJK SC", serif',
- '等宽字体': 'var(--font-code)',
+import {useCallback, useEffect, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
+import {BookOpen, ChevronLeft, FileText, Link2, MessageSquare, NotebookPen, Plus, Search, Trash2, X} from 'lucide-react';
+import {discussionTitle, type Discussion, type StudyDoc} from '../lib/workspace-model';
+import {
+  currentNoteSource, matchingNotes, noteExcerpt, noteNumber, noteSourceKey,
+  type NotebookInsert, type NotebookInsertResult, type NoteSource, type NoteSourceInput, type StudyNote,
+} from '../lib/notebook-model';
+import {completeNoteSave, editNoteEntry, savedNoteEntry, type NoteEntry} from '../lib/notebook-drafts';
+import NotebookEditor from './NotebookEditor';
+import './notebook-library.css';
+
+export type NotebookView = {version: number; project?: string; threadId?: string; noteId?: string};
+export type NotebookProps = {
+  visible: boolean;
+  full: boolean;
+  panelHost: HTMLElement | null;
+  docs: StudyDoc[];
+  threads: Discussion[];
+  projects: string[];
+  currentSource?: NoteSourceInput;
+  view: NotebookView;
+  inserts: NotebookInsert[];
+  onInsertResult: (result: NotebookInsertResult) => void;
+  onNotesChange: (notes: StudyNote[]) => void;
+  onExpand: (noteId?: string) => void;
+  onClose: () => void;
+  onOpenSource: (source: NoteSource) => void;
 };
-const preferencesKey='pagewise:note-typography:v1';
-type Layout='continuous'|'standard'|'wide';
-type Preferences={font:string;size:number;layout:Layout;spacing?:string};
-const defaults:Preferences={font:'系统黑体',size:12,layout:'continuous'};
-
-function FormatTool({label,Icon,onAction}:{label:string;Icon:LucideIcon;onAction:()=>void}){
- return <button type="button" title={label} aria-label={label} onMouseDown={event=>event.preventDefault()} onClick={onAction}><Icon size={15} strokeWidth={1.7}/></button>;
+type Store = Record<string, NoteEntry>;
+class NoteApiError extends Error {
+  status: number;
+  code?: string;
+  constructor(message: string, status: number, code?: string) {super(message); this.status = status; this.code = code;}
 }
 
-function scrollPreview(event:ReactKeyboardEvent<HTMLDivElement>){
- if(event.key!=='ArrowDown'&&event.key!=='ArrowUp')return;
- if(event.defaultPrevented||event.nativeEvent.isComposing||event.altKey||event.ctrlKey||
-    event.metaKey||event.shiftKey||event.target!==event.currentTarget)return;
- const preview=event.currentTarget;
- const slide=preview.querySelector<HTMLElement>('.nb-slide');
- const down=event.key==='ArrowDown';
- const canScrollSlide=slide&&(down?slide.scrollHeight-slide.clientHeight-slide.scrollTop>1:slide.scrollTop>0);
- const surface=canScrollSlide?slide:preview;
- event.preventDefault();
- surface.scrollTop+=down?48:-48;
+async function noteRequest<T>(path = '', value?: unknown, method = value === undefined ? 'GET' : 'POST'): Promise<T> {
+  const response = await fetch(`/api/study/notes${path}`, {
+    method, ...(value === undefined ? {} : {headers: {'Content-Type': 'application/json'}, body: JSON.stringify(value)}),
+  });
+  const data = await response.json().catch(() => ({error: '笔记服务暂时无法响应，请重试。'})) as T & {error?: string; code?: string};
+  if (!response.ok) throw new NoteApiError(data.error || '笔记操作失败，请重试。', response.status, data.code);
+  return data as T;
 }
+const saveLabels = {saved: '已同步', dirty: '待保存', saving: '保存中…', error: '保存失败', conflict: '需要合并'};
+const threadLabel = (thread: Discussion) => thread.messages.some(message => message.role === 'user')
+  ? discussionTitle(thread)
+  : `第 ${thread.page} 页 · ${thread.text && thread.text !== '按页提问' ? thread.text.slice(0, 60) : '笔记对话'}`;
 
-export default function Notebook({visible,inserts,onAppend,onSaved}:{visible:boolean;inserts:{text:string;id:number}[];onAppend:(id:number)=>void;onSaved:(id:number)=>void}){
- const [body,setBody]=useState(''),[revision,setRevision]=useState(-1),[preview,setPreview]=useState(false),[status,setStatus]=useState('正在读取…');
- const area=useRef<HTMLTextAreaElement>(null),last=useRef(''),saving=useRef(false),inserted=useRef(0),[attempt,retry]=useState(0),[blocked,setBlocked]=useState(false);
- const [prefs,setPrefs]=useState(defaults);
- const [page,setPage]=useState(0);
- const [menu,setMenu]=useState(false);
- const [reloading,setReloading]=useState(false);
- const actions=useRef<HTMLDivElement>(null),importFile=useRef<HTMLInputElement>(null),stage=useRef<HTMLDialogElement>(null);
- const [dialogPortal,setDialogPortal]=useState<HTMLElement|null>(null);
- const [expanded,setExpanded]=useState(false);
- const {pages,headings}=useMemo(()=>preview?notebookNavigation(body):{pages:[],headings:[]},[body,preview]);
- const editor=useRef<HTMLDivElement>(null),previewHost=useRef<HTMLDivElement>(null),expandedPreviewHost=useRef<HTMLDivElement>(null);
- const [outlineTarget,setOutlineTarget]=useState<number|null>(null);
- const [previewHostElement,setPreviewHostElement]=useState<HTMLDivElement|null>(null);
- const [expandedPreviewElement,setExpandedPreviewElement]=useState<HTMLDivElement|null>(null);
- useEffect(()=>{
-   if(expanded)expandedPreviewHost.current?.focus({preventScroll:true});
- },[expanded]);
- const index=Math.min(page,Math.max(0,pages.length-1));
- useEffect(()=>{
-   let frame=0;
-   try{
-     const saved=JSON.parse(localStorage.getItem(preferencesKey)||'null');
-     if(saved && typeof saved.font==='string' && saved.font.length<=100 && Number.isInteger(saved.size)&&saved.size>=8&&saved.size<=72&&['continuous','standard','wide'].includes(saved.layout))frame=requestAnimationFrame(()=>setPrefs(saved));
-   }catch{}
-   return()=>cancelAnimationFrame(frame);
- },[]);
- function preference(change:Partial<Preferences>){
-   const next={...prefs,...change};setPrefs(next);
-   try{localStorage.setItem(preferencesKey,JSON.stringify(next))}catch{}
- }
- useEffect(()=>{
-   if(!menu)return;
-   function outside(e:PointerEvent){if(!actions.current?.contains(e.target as Node))setMenu(false)}
-   function escape(e:KeyboardEvent){if(e.key==='Escape')setMenu(false)}
-   document.addEventListener('pointerdown',outside);document.addEventListener('keydown',escape);
-   return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape)};
- },[menu]);
- useEffect(()=>{let live=true;fetch('/api/study/notebook').then(async r=>{const data=await r.json() as {body:string;revision:number;error?:string};if(!r.ok)throw Error(data.error);if(live){setBody(data.body);last.current=data.body;setRevision(data.revision);setStatus('已同步');}}).catch(e=>{if(live)setStatus(e.message)});return()=>{live=false}},[]);
- useEffect(()=>{
-   if(revision<0)return;
-   const pending=inserts.filter(item=>item.id>inserted.current);
-   const latest=pending.at(-1);
-   if(!latest)return;
-   inserted.current=latest.id;
-   setBody(value=>[value.trimEnd(),...pending.map(item=>item.text)].filter(Boolean).join('\n\n'));
-   onAppend(latest.id);
- },[inserts,revision,onAppend]);
- useEffect(()=>{
-  if(revision<0||last.current===body)return;
-  const warn=(e:BeforeUnloadEvent)=>e.preventDefault();
-  window.addEventListener('beforeunload',warn);
-  let timer:ReturnType<typeof setTimeout>|undefined;
-  if(!blocked)timer=setTimeout(async()=>{
-    if(saving.current){retry(value=>value+1);return;}
-    saving.current=true;
-    const savedInsert=inserted.current;
-    setStatus('保存中…');
-    try{
-      const response=await fetch('/api/study/notebook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body,revision})});
-      const data=await response.json() as {revision:number;error?:string};
-      if(!response.ok){if(response.status===409)setBlocked(true);throw new Error(data.error||'保存失败');}
-      last.current=body;
-      setStatus('已同步');
-      setRevision(data.revision);
-      onSaved(savedInsert);
+export default function Notebook({
+  visible, full, panelHost, docs, threads, projects, currentSource, view, inserts,
+  onInsertResult, onNotesChange, onExpand, onClose, onOpenSource,
+}: NotebookProps) {
+  const [store, setStore] = useState<Store>({});
+  const storeRef = useRef<Store>({});
+  const changeStore = useCallback((update: (value: Store) => Store) => {
+    const next = update(storeRef.current);
+    storeRef.current = next;
+    setStore(next);
+  }, []);
+  const [loaded, setLoaded] = useState(false), [loading, setLoading] = useState(false), [loadError, setLoadError] = useState('');
+  const loadingRef = useRef(false), mounted = useRef(true);
+  const [project, setProject] = useState(''), [threadId, setThreadId] = useState(''), [query, setQuery] = useState('');
+  const [activeId, setActiveId] = useState(''), [mobileEditing, setMobileEditing] = useState(false);
+  const [creating, setCreating] = useState(false), [operationError, setOperationError] = useState('');
+  const [reloading, setReloading] = useState(false);
+  const saving = useRef(new Set<string>());
+  const manualCreate = useRef<{id: string; title: string; body: string; sources: NoteSourceInput[]} | null>(null);
+  const [queueTick, setQueueTick] = useState(0);
+  const processing = useRef(false), processed = useRef(new Set<number>()), failed = useRef(new Set<number>());
+  const [sourceProject, setSourceProject] = useState(''), [sourceDoc, setSourceDoc] = useState(''), [sourceThread, setSourceThread] = useState('');
+  const [sourceError, setSourceError] = useState('');
+  const sourceDialog = useRef<HTMLDialogElement>(null), deleteDialog = useRef<HTMLDialogElement>(null);
+  const [removing, setRemoving] = useState<StudyNote | null>(null), [deleting, setDeleting] = useState(false);
+  const indexHost = useRef<HTMLElement>(null);
+
+  useEffect(() => {mounted.current = true; return () => {mounted.current = false;};}, []);
+  const load = useCallback(async () => {
+    if (loadingRef.current) return;
+    loadingRef.current = true; setLoading(true); setLoadError('');
+    const startedAt = Date.now();
+    try {
+      const {notes} = await noteRequest<{notes: StudyNote[]}>();
+      if (!mounted.current) return;
+      changeStore(previous => {
+        const next: Store = {};
+        for (const note of notes) next[note.id] = previous[note.id]?.status !== undefined && previous[note.id].status !== 'saved'
+          ? previous[note.id] : savedNoteEntry(note);
+        for (const [id, entry] of Object.entries(previous)) {
+          if (next[id]) continue;
+          if (entry.saved.createdAt >= startedAt) next[id] = entry;
+          else if (entry.status !== 'saved') next[id] = {...entry, status: 'conflict', error: '这条笔记已在其他窗口删除。请导出当前编辑。'};
+        }
+        return next;
+      });
+      setLoaded(true);
+    } catch (error) {if (mounted.current) setLoadError((error as Error).message);}
+    finally {loadingRef.current = false; if (mounted.current) setLoading(false);}
+  }, [changeStore]);
+  useEffect(() => {void load();}, [load]);
+  useEffect(() => {
+    if (!visible) return;
+    void load();
+    const refresh = () => {void load();};
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [visible, load]);
+  useEffect(() => {onNotesChange(Object.values(store).map(entry => entry.note));}, [store, onNotesChange]);
+  useEffect(() => {
+    setProject(view.project ?? ''); setThreadId(view.threadId ?? ''); setQuery('');
+    setActiveId(view.noteId ?? ''); setMobileEditing(!!view.noteId);
+  }, [view]);
+
+  const save = useCallback(async (id: string) => {
+    const entry = storeRef.current[id];
+    if (!entry || saving.current.has(id) || entry.status === 'saved' || entry.status === 'conflict') return;
+    saving.current.add(id);
+    const pending = entry.pending ?? {note: entry.note, version: entry.version, revision: entry.saved.revision, requestId: crypto.randomUUID()};
+    changeStore(previous => ({...previous, [id]: {...previous[id], pending, status: 'saving', error: undefined}}));
+    try {
+      const {note} = await noteRequest<{note: StudyNote}>(`/${encodeURIComponent(id)}`, {
+        title: pending.note.title, number: pending.note.number, body: pending.note.body,
+        sources: pending.note.sources, revision: pending.revision, requestId: pending.requestId,
+      });
+      if (!mounted.current) return;
+      changeStore(previous => previous[id] ? {...previous, [id]: completeNoteSave(previous[id], pending, note)} : previous);
       window.dispatchEvent(new Event('pagewise:credits-changed'));
-    }catch(error){setStatus(error instanceof Error?error.message:'保存失败');}
-    finally{saving.current=false;}
-  },500);
-  return()=>{clearTimeout(timer);window.removeEventListener('beforeunload',warn);};
- },[body,revision,attempt,blocked,onSaved]);
- async function reloadSaved(){
-   setReloading(true);
-   try{
-     const response=await fetch('/api/study/notebook');
-     const data=await response.json() as {body:string;revision:number;error?:string};
-     if(!response.ok)throw new Error(data.error||'无法读取已保存版本');
-     last.current=data.body;
-     setBody(data.body);
-     setRevision(data.revision);
-     setBlocked(false);
-     setStatus('已同步');
-   }catch(error){setStatus(error instanceof Error?error.message:'无法读取已保存版本');}
-   finally{setReloading(false);}
- }
- function wrap(left:string,right:string,h=false){const el=area.current;if(!el)return;const start=h?body.lastIndexOf('\n',el.selectionStart-1)+1:el.selectionStart;const end=el.selectionEnd;const selected=body.slice(start,end);const before=h?selected.replace(/^#{1,6}\s+/,''):selected;setBody(body.slice(0,start)+left+before+right+body.slice(end));requestAnimationFrame(()=>{el.focus();el.setSelectionRange(start+left.length,start+left.length+before.length)});}
- function download(){const url=URL.createObjectURL(new Blob([body],{type:'text/markdown;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='我的学习笔记.md';a.click();setTimeout(()=>URL.revokeObjectURL(url),5000);}
- function normalize(){
-   let fence='';
-   setBody(body.split('\n').map(line=>{
-     const marker=line.trimStart().match(/^(`{3,}|~{3,}|\$\$)/)?.[0];
-     if(marker){if(!fence)fence=marker;else if(marker.startsWith(fence))fence='';return line;}
-     return fence?line:line.replace(/^(#{1,6})([^#\s])/,'$1 $2').replace(/^([*+-])\s+/, '- ');
-   }).join('\n'));
- }
- const font=fontFamilies[prefs.font]||(`"${prefs.font.replace(/["\\]/g,'')}", system-ui, sans-serif`);
- const style={'--note-font':font,'--note-size':prefs.size+'pt','--note-leading':prefs.spacing==='compact'?1.45:1.75,'--slide-ratio-number':prefs.layout==='wide'?16/9:4/3,'--slide-ratio':prefs.layout==='wide'?'16 / 9':'4 / 3'} as CSSProperties;
- const slide=prefs.layout!=='continuous';
- function previewContent(){
-   const content=slide?pages[index]||'':body;
-   return <div key={slide?index:'document'} className={slide?'nb-slide':'nb-flow'}>{content.trim()?<MarkdownAnswer content={content}/>:<p className="nb-empty">在「编辑」中写下第一段笔记。</p>}</div>;
- }
- const onOutlineClose=useCallback((event:Event,inDialog:boolean)=>{
-   const headingIndex=outlineTarget;
-   setOutlineTarget(null);
-   const host=inDialog?expandedPreviewElement:previewHostElement;
-   if(headingIndex===null||!host)return;
-   const position=slide?headings[headingIndex]?.position:headingIndex;
-   event.preventDefault();
-   host.focus({preventScroll:true});
-   if(position!==undefined){
-     const headingsInPreview=host.querySelectorAll<HTMLElement>('.markdown-answer :is(h1,h2,h3,h4,h5,h6)');
-     headingsInPreview[position]?.scrollIntoView({block:'nearest'});
-   }
- },[expandedPreviewElement,headings,outlineTarget,previewHostElement,slide]);
- function outline(inDialog=false){
-   if(!headings.length)return null;
-   return <DropdownMenu.Root modal={false}>
-     <DropdownMenu.Trigger className="nb-outline-trigger" aria-label="笔记目录">
-       目录<ChevronDown size={14} aria-hidden="true"/>
-     </DropdownMenu.Trigger>
-     <DropdownMenu.Portal container={inDialog?dialogPortal:undefined}>
-       <DropdownMenu.Content className="nb-outline-menu" align="end" sideOffset={4} collisionPadding={6}
-         onCloseAutoFocus={event=>onOutlineClose(event,inDialog)}>
-         {headings.map((heading,headingIndex)=><DropdownMenu.Item
-           key={headingIndex}
-           className="nb-outline-item"
-           textValue={heading.text}
-           title={heading.text}
-           style={{'--heading-indent':Math.min(heading.level-1,3)*10+'px'} as CSSProperties}
-           onSelect={()=>{
-             setOutlineTarget(headingIndex);
-             if(slide)setPage(heading.slide);
-           }}>
-           <span>{heading.text}</span>
-         </DropdownMenu.Item>)}
-       </DropdownMenu.Content>
-     </DropdownMenu.Portal>
-   </DropdownMenu.Root>;
- }
- function navigation(){
-   return <div className="nb-pagination"><button type="button" aria-label="上一张" disabled={index===0} onClick={()=>setPage(index-1)}><ChevronLeft size={16}/></button><span>{index+1} / {pages.length}</span><button type="button" aria-label="下一张" disabled={index+1>=pages.length} onClick={()=>setPage(index+1)}><ChevronRight size={16}/></button></div>;
- }
- return <section className="nb" hidden={!visible} style={style} aria-label="我的学习笔记">
-   <header className="nb-header"><div className="nb-title"><FileText size={17} aria-hidden="true"/><strong>学习笔记</strong></div>
-     <div className="nb-actions" ref={actions}><button className="nb-more" title="文件操作" aria-label="文件操作" aria-expanded={menu} onClick={()=>setMenu(!menu)}><Ellipsis size={18}/></button>
-       {menu&&<div className="nb-menu"><button disabled={revision<0} onClick={()=>{setMenu(false);importFile.current?.click()}}>导入 Markdown</button><button onClick={()=>{setMenu(false);download()}}>导出 Markdown</button><button disabled={blocked||revision<0} onClick={()=>{setMenu(false);retry(n=>n+1)}}>保存笔记</button></div>}
-       <input hidden ref={importFile} type="file" accept=".md,.markdown,text/markdown" onChange={async e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;if(f.size>750000){setStatus('文件过大');return}try{const imported=await f.text();setBody(v=>[v,imported].filter(Boolean).join('\n\n'));setPreview(false)}catch{setStatus('文件读取失败')}}}/>
-     </div>
-   </header>
-   <div className="nb-editor" ref={editor}>
-     <div className="nb-modes" role="group" aria-label="笔记视图">
-       <button aria-pressed={!preview} onClick={()=>setPreview(false)}><PencilLine size={15}/>编辑</button>
-       <button aria-pressed={preview} onClick={()=>{
-         setPreview(true);
-         requestAnimationFrame(()=>previewHost.current?.focus({preventScroll:true}));
-       }}><Eye size={16}/>预览</button>
-       {preview&&<button className="nb-expand" aria-label="放大预览" title="放大预览" onClick={()=>{setExpanded(true);stage.current?.showModal()}}><Maximize2 size={15}/></button>}
-     </div>
-     <details className="nb-typography"><summary>排版设置</summary><div className="nb-typebar">
-       <label>字体<select aria-label="笔记字体" value={Object.hasOwn(fontFamilies,prefs.font)?prefs.font:'custom'} onChange={e=>preference({font:e.target.value==='custom'?'':e.target.value})}>{Object.keys(fontFamilies).map(f=><option key={f}>{f}</option>)}<option value="custom">自定义字体</option></select></label>
-       <label>字号<span className="nb-number"><input aria-label="笔记字号" type="number" min={8} max={72} key={prefs.size} defaultValue={prefs.size} onBlur={e=>{const n=e.target.valueAsNumber;if(Number.isFinite(n))preference({size:Math.min(72,Math.max(8,Math.round(n)))});e.target.value=String(Number.isFinite(n)?Math.min(72,Math.max(8,Math.round(n))):prefs.size)}} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur()}}/><span>pt</span></span></label>
-       <label>行距<select aria-label="笔记行距" value={prefs.spacing??'normal'} onChange={e=>preference({spacing:e.target.value})}><option value="normal">宽松</option><option value="compact">紧凑</option></select></label>
-       {!Object.hasOwn(fontFamilies,prefs.font)&&<input className="nb-custom" aria-label="本机字体名称" placeholder="输入本机已安装的字体名" maxLength={100} value={prefs.font} onChange={e=>preference({font:e.target.value})}/>}
-     </div></details>
-     {preview?<div className="nb-layout"><label>版式 <select value={prefs.layout} aria-label="预览版式" onChange={e=>{setPage(0);preference({layout:e.target.value as Layout})}}><option value="continuous">连续文档</option><option value="standard">标准幻灯片 · 4:3</option><option value="wide">宽屏幻灯片 · 16:9</option></select></label>{outline()}{slide&&navigation()}</div>:<fieldset className="nb-format" aria-label="Markdown 格式" disabled={revision<0}>
-       <select aria-label="插入标题" value="" onChange={e=>wrap('#'.repeat(Number(e.target.value))+' ','',true)}><option value="" disabled>标题</option>{[1,2,3,4,5,6].map(n=><option value={n} key={n}>H{n}</option>)}</select>
-       <FormatTool label="加粗" Icon={Bold} onAction={()=>wrap('**','**')}/><FormatTool label="高亮" Icon={Highlighter} onAction={()=>wrap('==','==')}/><FormatTool label="公式" Icon={Sigma} onAction={()=>wrap('$','$')}/><FormatTool label="列表" Icon={List} onAction={()=>wrap('- ','',true)}/><FormatTool label="插入幻灯片分页线" Icon={SplitSquareVertical} onAction={()=>wrap('\n\n---\n\n','')}/><FormatTool label="规范排版" Icon={SpellCheck} onAction={normalize}/>
-     </fieldset>}
-     {preview?<div ref={node=>{previewHost.current=node;setPreviewHostElement(node)}} className={'nb-preview'+(slide?' paper-stage':'')} tabIndex={0}
-       role="region" aria-label="笔记预览" onKeyDown={scrollPreview}>{previewContent()}</div>:
-       <textarea ref={area} disabled={revision<0} aria-label="Markdown 学习笔记" value={body} onChange={e=>setBody(e.target.value)} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='b'){e.preventDefault();wrap('**','**')}}} placeholder="写下你的笔记…"/>}
-   </div>
-   {blocked&&<section className="nb-conflict" role="alert"><p>笔记已在其他位置更新。导出当前编辑后，可重新读取已保存版本。</p><button type="button" onClick={download}>导出当前编辑</button><button type="button" disabled={reloading} onClick={()=>void reloadSaved()}>{reloading?'正在读取…':'用已保存版本替换当前编辑'}</button></section>}
-   <footer className="nb-status"><span role="status" className={status==='已同步'?'nb-status-saved':''}>{status==='已同步'&&<Check size={13}/>} {status}</span><span>{body.length.toLocaleString()} 字符</span></footer>
-   <dialog ref={node=>{stage.current=node;if(node)setDialogPortal(node)}} className="nb-dialog" onClose={()=>setExpanded(false)}><header><strong>学习笔记</strong>{expanded&&outline(true)}{slide&&navigation()}<button aria-label="关闭放大预览" onClick={()=>stage.current?.close()}>关闭</button></header>{expanded&&<div ref={node=>{expandedPreviewHost.current=node;setExpandedPreviewElement(node)}} className={'nb-preview'+(slide?' paper-stage':'')}
-     tabIndex={0} role="region" aria-label="放大的笔记预览" onKeyDown={scrollPreview}>{previewContent()}</div>}</dialog>
- </section>
+    } catch (error) {
+      if (!mounted.current) return;
+      const failure = error as NoteApiError;
+      changeStore(previous => previous[id] ? {...previous, [id]: {
+        ...previous[id], status: failure.code === 'note_changed' || failure.status === 404 ? 'conflict' : 'error',
+        error: failure.message,
+        pending: failure.status >= 400 && failure.status < 500 ? undefined : pending,
+      }} : previous);
+    } finally {saving.current.delete(id);}
+  }, [changeStore]);
+  useEffect(() => {
+    const timers = Object.values(store).filter(entry => entry.status === 'dirty')
+      .map(entry => setTimeout(() => {void save(entry.note.id);}, 600));
+    return () => timers.forEach(clearTimeout);
+  }, [store, save]);
+  useEffect(() => {
+    if (!Object.values(store).some(entry => entry.status !== 'saved') && !inserts.some(item => !processed.current.has(item.id))) return;
+    const warn = (event: BeforeUnloadEvent) => {event.preventDefault(); event.returnValue = '';};
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [store, inserts, queueTick]);
+
+  const acceptCreated = useCallback((note: StudyNote) => {
+    changeStore(previous => previous[note.id] && previous[note.id].status !== 'saved' ? previous : {...previous, [note.id]: savedNoteEntry(note)});
+    setActiveId(note.id); setMobileEditing(true); setQuery('');
+    setProject(previous => !previous || note.sources.some(source => source.project === previous) ? previous : '');
+    setThreadId(previous => !previous || note.sources.some(source => source.threadId === previous) ? previous : '');
+    setOperationError('');
+    window.dispatchEvent(new Event('pagewise:credits-changed'));
+  }, [changeStore]);
+  useEffect(() => {
+    if (!loaded || processing.current) return;
+    const item = inserts.find(insert => !processed.current.has(insert.id) && !failed.current.has(insert.id));
+    if (!item) return;
+    processing.current = true;
+    onInsertResult({id: item.id, noteId: item.noteId, status: 'saving'});
+    noteRequest<{note: StudyNote}>('', {id: item.noteId, title: item.title, body: item.text, sources: item.sources})
+      .then(({note}) => {
+        if (!mounted.current) return;
+        processed.current.add(item.id); acceptCreated(note);
+        onInsertResult({id: item.id, noteId: note.id, status: 'saved'});
+      }).catch(error => {
+        if (!mounted.current) return;
+        failed.current.add(item.id); setOperationError(error.message);
+        onInsertResult({id: item.id, noteId: item.noteId, status: 'error', error: error.message});
+      }).finally(() => {processing.current = false; if (mounted.current) setQueueTick(value => value + 1);});
+  }, [inserts, loaded, queueTick, acceptCreated, onInsertResult]);
+
+  const notes = Object.values(store).map(entry => entry.note);
+  const filtered = matchingNotes(notes, {project, threadId, query});
+  const entry = store[activeId] ?? (filtered[0] ? store[filtered[0].id] : undefined);
+  const note = entry?.note;
+  const allProjects = [...new Set([...projects, ...notes.flatMap(item => item.sources.map(source => source.project))])];
+  const scopeThreads = threads.filter(thread => !thread.id.startsWith('draft-') &&
+    (!project || docs.some(doc => doc.id === thread.docId && doc.course === project)));
+  const displaySources = (note?.sources ?? []).map(source => {
+    const doc = docs.find(item => item.id === source.docId);
+    const thread = threads.find(item => item.id === source.threadId);
+    return {...source, ...(doc ? {project: doc.course, documentName: doc.name} : {}),
+      available: source.available && (!source.docId || !!doc) && (!source.threadId || !!thread)};
+  });
+
+  function edit(change: Partial<StudyNote>) {
+    if (!note) return;
+    changeStore(previous => ({...previous, [note.id]: editNoteEntry(previous[note.id], change)}));
+  }
+  async function create() {
+    if (creating || !loaded) return;
+    const chosenThread = scopeThreads.find(thread => thread.id === threadId);
+    const chosenDoc = chosenThread ? docs.find(doc => doc.id === chosenThread.docId) : undefined;
+    const sources = full
+      ? chosenDoc && chosenThread ? [currentNoteSource(chosenDoc, chosenThread)] : project ? [{project}] : []
+      : currentSource ? [currentSource] : [];
+    const attempt = manualCreate.current ?? {id: crypto.randomUUID(), title: '未命名笔记', body: '', sources};
+    manualCreate.current = attempt; setCreating(true); setOperationError('');
+    try {
+      const {note: created} = await noteRequest<{note: StudyNote}>('', attempt);
+      if (mounted.current) {acceptCreated(created); manualCreate.current = null;}
+    } catch (error) {
+      if (mounted.current) {
+        if (error instanceof NoteApiError && error.status >= 400 && error.status < 500) manualCreate.current = null;
+        setOperationError((error as Error).message);
+      }
+    }
+    finally {if (mounted.current) setCreating(false);}
+  }
+  async function reloadSaved() {
+    if (!note || reloading) return;
+    const id = note.id;
+    setReloading(true);
+    try {
+      const {note: saved} = await noteRequest<{note: StudyNote}>(`/${encodeURIComponent(id)}`);
+      changeStore(previous => ({...previous, [id]: savedNoteEntry(saved)}));
+    } catch (error) {setOperationError((error as Error).message);}
+    finally {setReloading(false);}
+  }
+  function openSources() {
+    const candidate = currentSource?.project || project;
+    setSourceProject(candidate && projects.includes(candidate) ? candidate : projects[0] ?? '');
+    setSourceDoc(''); setSourceThread(''); setSourceError('');
+    sourceDialog.current?.showModal();
+  }
+  function addCurrentSource() {
+    if (!note || !currentSource) return;
+    const key = noteSourceKey(currentSource);
+    if (note.sources.some(source => source.key === key)) return;
+    if (note.sources.length >= 50) {setOperationError('每条笔记最多关联 50 个来源。'); return;}
+    const doc = docs.find(item => item.id === currentSource.docId);
+    const thread = threads.find(item => item.id === currentSource.threadId);
+    edit({sources: [...note.sources, {key, ...currentSource, available: true,
+        ...(doc ? {documentName: doc.name} : {}), ...(thread ? {discussionTitle: threadLabel(thread)} : {})}]});
+  }
+  function addSource(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!note || !sourceProject) return;
+    const thread = threads.find(item => item.id === sourceThread);
+    const doc = docs.find(item => item.id === (thread?.docId ?? sourceDoc));
+    const input: NoteSourceInput = {project: sourceProject, ...(doc ? {docId: doc.id} : {}),
+      ...(thread ? {threadId: thread.id, page: thread.page} : {})};
+    const key = noteSourceKey(input);
+    if (note.sources.some(source => source.key === key)) {setSourceError('这条笔记已经关联了该来源。'); return;}
+    if (note.sources.length >= 50) {setSourceError('每条笔记最多关联 50 个来源。'); return;}
+    edit({sources: [...note.sources, {key, ...input, available: true,
+      ...(doc ? {documentName: doc.name} : {}), ...(thread ? {discussionTitle: threadLabel(thread)} : {})}]});
+    sourceDialog.current?.close();
+  }
+  async function deleteNote(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!removing || deleting || saving.current.has(removing.id)) return;
+    setDeleting(true); setOperationError('');
+    try {
+      await noteRequest(`/${encodeURIComponent(removing.id)}`, undefined, 'DELETE').catch(error => {
+        if (!(error instanceof NoteApiError) || error.status !== 404) throw error;
+      });
+      changeStore(previous => {const next = {...previous}; delete next[removing.id]; return next;});
+      if (activeId === removing.id) setActiveId('');
+      setMobileEditing(false); deleteDialog.current?.close(); setRemoving(null);
+    } catch (error) {setOperationError((error as Error).message);}
+    finally {setDeleting(false);}
+  }
+  function retryOperations() {
+    failed.current.clear(); setQueueTick(value => value + 1); setOperationError('');
+    if (manualCreate.current) void create();
+  }
+  const sourceDocs = docs.filter(doc => doc.course === sourceProject);
+  const sourceThreads = threads.filter(thread => !thread.id.startsWith('draft-') &&
+    sourceDocs.some(doc => doc.id === thread.docId) && (!sourceDoc || thread.docId === sourceDoc));
+
+  function noteList() {
+    return <>
+      <label className="nl-search"><Search size={16}/><input type="search" aria-label="搜索笔记" placeholder="搜索编号、标题或正文" value={query} onChange={event => setQuery(event.target.value)}/></label>
+      <div className="nl-filters">
+        <select aria-label="按项目筛选笔记" value={project} onChange={event => {setProject(event.target.value); setThreadId(''); setActiveId(''); setMobileEditing(false);}}>
+          <option value="">全部项目</option>{allProjects.map(name => <option key={name} value={name}>{name}</option>)}
+        </select>
+        <select aria-label="按对话筛选笔记" value={threadId} onChange={event => {setThreadId(event.target.value); setActiveId(''); setMobileEditing(false);}}>
+          <option value="">全部对话</option>{scopeThreads.map(thread => <option key={thread.id} value={thread.id}>{threadLabel(thread)}</option>)}
+          {threadId && !scopeThreads.some(thread => thread.id === threadId) && <option value={threadId}>原对话已删除</option>}
+        </select>
+      </div>
+      <p className="nl-count" role="status">{filtered.length} 条笔记{loading ? '，正在同步…' : ''}</p>
+      <nav className="nl-note-list" aria-label="笔记列表">{filtered.map(item =>
+        <button type="button" key={item.id} className="nl-note" aria-current={note?.id === item.id ? 'page' : undefined}
+          onClick={() => {setActiveId(item.id); setMobileEditing(true);}}>
+          <span className="nl-note-heading"><span className="nl-number">{noteNumber(item.number)}</span><strong>{item.title || '未命名笔记'}</strong>
+            {store[item.id].status !== 'saved' && <span className="nl-unsaved" aria-label={saveLabels[store[item.id].status]}/>}</span>
+          <span className="nl-note-excerpt">{noteExcerpt(item.body) || '还没有正文'}</span>
+          <small>{[...new Set(item.sources.map(source => source.project))].join('、') || '独立笔记'}
+            {item.sources.filter(source => source.threadId).length > 0 && ` · ${item.sources.filter(source => source.threadId).length} 个对话`}</small>
+        </button>,
+      )}</nav>
+      {loaded && !filtered.length && <div className="nl-list-empty"><NotebookPen size={26}/><p>{notes.length ? '没有匹配的笔记' : '还没有笔记'}</p>
+        <span>{query || project || threadId ? '调整筛选条件，或在这里新建。' : '在对话中记录想法，或新建一条独立笔记。'}</span></div>}
+    </>;
+  }
+  const content = <section className={`notebook-library ${full ? 'nl-full' : 'nl-compact'} ${mobileEditing ? 'nl-editing' : ''}`}
+    hidden={!visible} aria-label="学习笔记本">
+    <header className="nl-header"><div><NotebookPen size={21}/><h1>笔记本</h1></div><div className="nl-header-actions">
+      {full ? <button type="button" onClick={onClose}><BookOpen size={16}/>返回</button> : <button type="button" onClick={() => onExpand(note?.id)}>全部笔记本</button>}
+      <button type="button" className="nl-create" disabled={!loaded || creating} onClick={() => {void create();}}><Plus size={16}/>{creating ? '创建中…' : '新建笔记'}</button>
+    </div></header>
+    {loadError && <div className="nl-error" role="alert"><span>{loadError}</span><button type="button" disabled={loading} onClick={() => {void load();}}>重新读取</button></div>}
+    {operationError && <div className="nl-error" role="alert"><span>{operationError}</span>
+      {manualCreate.current||failed.current.size>0?<button type="button" disabled={creating} onClick={retryOperations}>重试</button>:<button type="button" onClick={()=>setOperationError('')}>关闭</button>}</div>}
+    {!loaded && !loadError && <p className="nl-loading" role="status">正在读取笔记本…</p>}
+    <div className="nl-body">
+      {full ? <aside className="nl-index" ref={indexHost}>{noteList()}</aside> : <details className="nl-switcher" open={!note}>
+        <summary><FileText size={15}/><span>{note ? `${noteNumber(note.number)} ${note.title}` : '选择笔记'}</span><small>{notes.length} 条</small></summary>
+        <div className="nl-index">{noteList()}</div>
+      </details>}
+      {entry && note ? <article className="nl-document">
+        <div className="nl-document-header">
+          {full && <button type="button" className="nl-back-list" onClick={() => {setMobileEditing(false); indexHost.current?.querySelector<HTMLButtonElement>('[aria-current=page]')?.focus();}}><ChevronLeft size={17}/>笔记列表</button>}
+          <label className="nl-number-field">编号<input type="number" aria-label="笔记编号" min={1} max={999999999} key={`${note.id}:${note.number}`} defaultValue={note.number}
+            onBlur={event => {const value = event.currentTarget.valueAsNumber; if (Number.isInteger(value) && value >= 1 && value <= 999999999) {if (value !== note.number) edit({number: value});} else event.currentTarget.value = String(note.number);}}
+            onKeyDown={event => {if (event.key === 'Enter') event.currentTarget.blur();}}/></label>
+          <button type="button" className="nl-delete" aria-label="删除这条笔记" disabled={entry.status === 'saving'}
+            onClick={() => {setRemoving(note); deleteDialog.current?.showModal();}}><Trash2 size={16}/></button>
+        </div>
+        <input className="nl-note-title" aria-label="笔记标题" placeholder="未命名笔记" maxLength={120} value={note.title} onChange={event => edit({title: event.target.value})}/>
+        <div className="nl-sources">
+          <div className="nl-sources-heading"><span><Link2 size={14}/>关联来源</span>
+            {currentSource?.threadId&&!note.sources.some(source=>source.threadId===currentSource.threadId)&&<button type="button" onClick={addCurrentSource}><MessageSquare size={14}/>关联当前对话</button>}
+            <button type="button" onClick={openSources}><Plus size={14}/>关联项目或对话</button></div>
+          {displaySources.length > 0 ? <ul>{displaySources.map(source => <li key={source.key}>
+            <button type="button" className="nl-source-link" disabled={!source.available || !source.docId} title={source.discussionTitle}
+              onClick={() => onOpenSource(source)}>{source.threadId ? <MessageSquare size={14}/> : <FileText size={14}/>}
+              <span><strong>{source.project}</strong><span>{source.discussionTitle ?? source.documentName ?? '整个项目'}</span>
+                {!source.available && <small>来源已删除，笔记仍保留</small>}</span></button>
+            <button type="button" className="nl-source-remove" aria-label={`移除关联：${source.discussionTitle ?? source.documentName ?? source.project}`}
+              onClick={() => edit({sources: note.sources.filter(item => item.key !== source.key)})}><X size={14}/></button>
+          </li>)}</ul> : <p>可关联多个项目和对话，在同一条笔记里整理。</p>}
+        </div>
+        <NotebookEditor key={note.id} body={note.body} title={note.title} number={note.number}
+          status={entry.error ?? saveLabels[entry.status]} blocked={entry.status === 'conflict'}
+          onChange={body => edit({body})} onRetry={() => {void save(note.id);}} onReload={() => {void reloadSaved();}} reloading={reloading}/>
+        {entry.status === 'error' && <button type="button" className="nl-retry-save" onClick={() => {void save(note.id);}}>重试保存</button>}
+      </article> : full && loaded && <div className="nl-document-empty"><NotebookPen size={38}/><h2>把思考留在笔记里</h2><p>选择一条笔记继续写，或新建一条。<br/>笔记可以关联来自不同项目的对话。</p><button type="button" disabled={creating} onClick={() => {void create();}}><Plus size={16}/>新建笔记</button></div>}
+    </div>
+    <dialog className="nl-dialog" ref={sourceDialog} aria-labelledby="note-source-title">
+      <form onSubmit={addSource}><h2 id="note-source-title">关联项目或对话</h2><p>选择来源，同一条笔记可以关联多个项目。</p>
+        <label>项目<select required value={sourceProject} onChange={event => {setSourceProject(event.target.value); setSourceDoc(''); setSourceThread('');}}>
+          <option value="" disabled>选择项目</option>{projects.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
+        <label>资料<select value={sourceDoc} onChange={event => {setSourceDoc(event.target.value); setSourceThread('');}}><option value="">整个项目</option>{sourceDocs.map(doc => <option key={doc.id} value={doc.id}>{doc.name}</option>)}</select></label>
+        <label>对话<select value={sourceThread} onChange={event => setSourceThread(event.target.value)}><option value="">仅关联项目或资料</option>{sourceThreads.map(thread => <option key={thread.id} value={thread.id}>{threadLabel(thread)}</option>)}</select></label>
+        {!projects.length && <p>先新建项目或导入资料，即可关联来源。</p>}
+        {sourceError && <p className="nl-error" role="alert">{sourceError}</p>}
+        <div className="nl-dialog-actions"><button type="button" onClick={() => sourceDialog.current?.close()}>取消</button><button type="submit" disabled={!sourceProject}><Link2 size={15}/>添加关联</button></div>
+      </form>
+    </dialog>
+    <dialog className="nl-dialog" ref={deleteDialog} aria-labelledby="note-delete-title" onCancel={event => {if (deleting) event.preventDefault();}}>
+      <form onSubmit={deleteNote}><h2 id="note-delete-title">删除笔记</h2><p>确认删除 {removing ? `${noteNumber(removing.number)}「${removing.title}」` : '这条笔记'}？</p><p>删除后无法恢复，来源项目和对话会保留。</p>
+        {operationError && <p className="nl-error" role="alert">{operationError}</p>}
+        <div className="nl-dialog-actions"><button type="button" disabled={deleting} onClick={() => deleteDialog.current?.close()}>取消</button><button type="submit" className="nl-danger" disabled={deleting}>{deleting ? '删除中…' : '删除笔记'}</button></div>
+      </form>
+    </dialog>
+  </section>;
+  return full ? content : panelHost ? createPortal(content, panelHost) : null;
 }
