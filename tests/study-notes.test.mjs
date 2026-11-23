@@ -160,6 +160,41 @@ test('legacy notebook migration preserves text and versions without another rewa
   assert.equal((await s.req('notebook')).data.body, '');
 });
 
+test('legacy writes during deployment are reconciled before a modern note can save', async () => {
+  const s = setup({legacy: {body: '发布前的笔记', revision: 7}});
+  const migrated = (await s.req('notes')).data.notes[0];
+  // Simulate the previous Worker saving after D1 migrations, before the new
+  // Worker takes over. It only knows the original notebooks table.
+  s.sql.prepare('UPDATE notebooks SET body=?,revision=? WHERE owner=?')
+    .run('旧页面在发布期间保存', 8, 'alice');
+  const refreshed = (await s.req(`notes/${migrated.id}`)).data.note;
+  assert.equal(refreshed.body, '旧页面在发布期间保存');
+  assert.equal(refreshed.revision, 8);
+  s.sql.prepare('UPDATE notebooks SET body=?,revision=? WHERE owner=?')
+    .run('旧页面的最后一次保存', 9, 'alice');
+  assert.equal((await s.save(refreshed, {body: '过期的新页面草稿'})).status, 409);
+  let latest = (await s.req(`notes/${migrated.id}`)).data.note;
+  assert.equal(latest.body, '旧页面的最后一次保存');
+  assert.equal(latest.revision, 9);
+  const batch = s.ctx.db.batch;
+  s.ctx.db.batch = async statements => {
+    s.ctx.db.batch = batch;
+    // The legacy write lands after the new handler reads, before its batch.
+    s.sql.prepare('UPDATE notebooks SET body=?,revision=? WHERE owner=?')
+      .run('两次读取之间的旧页面保存', 10, 'alice');
+    return batch(statements);
+  };
+  assert.equal((await s.save(latest, {body: '不能覆盖旧页面的草稿'})).status, 409);
+  latest = (await s.req(`notes/${migrated.id}`)).data.note;
+  assert.equal(latest.body, '两次读取之间的旧页面保存');
+  assert.equal(latest.revision, 10);
+  assert.equal(s.sql.prepare('SELECT COUNT(*) n FROM learning_credits').get().n, 0);
+  assert.equal((await s.save(latest, {body: '新笔记本继续编辑'})).status, 200);
+  assert.equal((await s.req('notebook')).data.body, '新笔记本继续编辑');
+  s.sql.prepare('UPDATE notebooks SET body=?,revision=? WHERE owner=?').run('', 12, 'alice');
+  assert.equal((await s.req(`notes/${migrated.id}`)).data.note.body, '');
+});
+
 test('note and source writes roll back together when a source insert fails', async () => {
   const s = setup(), docId = s.doc(), threadId = s.thread(docId);
   s.sql.exec("CREATE TRIGGER reject_note_source BEFORE INSERT ON study_note_sources BEGIN SELECT RAISE(ABORT,'source failure'); END");
