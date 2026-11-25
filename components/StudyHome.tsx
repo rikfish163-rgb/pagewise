@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
-import { ArrowRight, BookOpen, ChevronRight, FileText, FolderOpen, History, MoreHorizontal, NotebookPen, Plus, Search, X } from 'lucide-react';
+import { ArrowRight, BookOpen, ChevronRight, FileText, FolderOpen, History, MessageSquareText, MoreHorizontal, NotebookPen, Plus, Search, X } from 'lucide-react';
 import type { Discussion, StudyDoc } from '../lib/workspace-model';
 import './study-home.css';
 import { readProgress, subscribeReadingProgress } from './reading-progress';
@@ -225,14 +225,14 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
     <div className="sh-main">
       <header className="sh-header"><h1>{activeProject ?? '学习首页'}</h1><div className="sh-header-actions">
         <button ref={projectTrigger} type="button" className="sh-project-switch" aria-controls="home-projects" aria-expanded={mobileProjects} onClick={()=>{setMobileProjects(true);requestAnimationFrame(()=>projectClose.current?.focus());}}><FolderOpen size={16}/>{activeProject??'全部项目'}</button>
-        <button ref={searchButton} type="button" className="sh-search-trigger" aria-label="搜索资料库" aria-haspopup="dialog" onClick={()=>{setSearchAll(false);searchDialog.current?.showModal();searchInput.current?.focus();setSearching(true);}}><Search size={17}/><span>搜索</span></button>
+        <button ref={searchButton} type="button" className="sh-search-trigger" aria-label="搜索资料库" aria-haspopup="dialog" onClick={()=>{setSearchAll(false);searchDialog.current?.showModal();searchInput.current?.focus();setSearching(true);}}><Search size={17}/><span>搜索</span><kbd className="sh-search-shortcut" aria-hidden="true">⌘K</kbd></button>
         <button type="button" className="sh-primary" onClick={()=>onImport(activeProject??undefined)}><Plus size={17}/>导入资料</button>
       </div></header>
       {error && <div className="sh-error" role="alert"><strong>资料暂时未能完整载入</strong><span>{error}</span><span>请刷新页面后重试。</span></div>}
       {loading ? <div className="sh-loading" role="status"><BookOpen size={26} /><p>正在载入你的学习项目…</p></div> : !projects.length ? !error && <div className="sh-empty">
         <span className="sh-empty-icon"><BookOpen size={36} strokeWidth={1.3} /></span><h2>还没有学习资料</h2><p>从右上角导入 PDF 或 PPTX，按课程建立项目。</p><small>单份不超过 20 MiB</small>{onSample && <button type="button" className="sh-sample" onClick={onSample}>打开示例讲义<ArrowRight size={16} /></button>}
       </div> : <>
-        {recent && activeProject === null && !search && <section className="sh-resume" aria-labelledby="sh-resume-title"><div className="sh-resume-body"><span className="sh-resume-label"><History size={15} />继续学习</span><p className="sh-resume-course">{recent.course}</p><h2 id="sh-resume-title">{title(recent)}</h2><p><span className="sh-resume-date">上次读到第 {recentPage} 页</span></p><button type="button" onClick={() => onOpenDoc(recent)} className="sh-resume-button">继续阅读<ArrowRight size={17} /></button></div><div className="sh-page-motif" aria-hidden="true"><FileText size={42} strokeWidth={1} /><span>{recent.kind.toUpperCase()}</span></div></section>}
+        {recent && activeProject === null && !search && <section className="sh-resume" aria-labelledby="sh-resume-title"><div className="sh-resume-body"><span className="sh-resume-label"><History size={15} />继续学习</span><p className="sh-resume-course">{recent.course}</p><h2 id="sh-resume-title">{title(recent)}</h2><p><span className="sh-resume-date">上次读到第 {recentPage} 页</span></p><button type="button" onClick={() => onOpenDoc(recent)} className="sh-resume-button">继续阅读<ArrowRight size={17} /></button></div><div className="sh-page-motif-wrap" aria-hidden="true"><div className="sh-page-motif"><FileText size={42} strokeWidth={1} /><span>{recent.kind.toUpperCase()}</span></div></div></section>}
         <section className="sh-documents" aria-label={activeProject === null ? '最近资料' : '项目资料'}>
           <div className="sh-document-toolbar"><h2>{activeProject === null ? '最近资料' : '项目资料'}</h2>{activeProject!==null&&<>{onOpenNotebook&&<button type="button" className="sh-memory-link" onClick={()=>onOpenNotebook(activeProject)}>项目笔记</button>}<button type="button" className="sh-memory-link" onClick={()=>onOpenMemory?.(activeProject)}>复习主题</button><select className="sh-sort" aria-label="文件排序方式" value={sort} onChange={event=>setSort(event.target.value==='name'?'name':'recent')}><option value="recent">最近活动</option><option value="name">文件名称</option></select></>}</div>
           {(activeProject === null ? recentDocs : sortedVisible).map(doc => <div className="sh-material-row" key={doc.id}>
@@ -270,10 +270,11 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
         </div>
         {search&&!composing&&<div className="sh-search-results">
           {matchingProjects.length>0&&<section><h3>项目</h3>{matchingProjects.map(name=><button type="button" key={name} onClick={()=>{setProject(name);searchDialog.current?.close();}}><FolderOpen size={16}/>{name||'未分类项目'}</button>)}</section>}
-          {matchingDocs.length>0&&<section><h3>资料</h3>{matchingDocs.map(doc=><button type="button" key={doc.id} title={doc.name} onClick={()=>openSearchResult(doc)}><span>{title(doc)}</span><small>{doc.course} · {doc.kind.toUpperCase()}</small></button>)}</section>}
-          {matchingQuestions.length>0&&<section><h3>提问</h3>{matchingQuestions.map(({doc,thread,message,index})=><button type="button" key={`${thread.id}-${index}`} onClick={()=>openSearchResult(doc,message.page??thread.page,thread.id)}><span>{message.content}</span><small>{title(doc)} · 第 {message.page??thread.page} 页</small></button>)}</section>}
+          {matchingDocs.length>0&&<section><h3>资料</h3>{matchingDocs.map(doc=><button type="button" key={doc.id} title={doc.name} onClick={()=>openSearchResult(doc)}><FileText size={16} aria-hidden="true" className="sh-result-icon"/><span className="sh-result-copy"><span>{title(doc)}</span><small>{doc.course} · {doc.kind.toUpperCase()}</small></span></button>)}</section>}
+          {matchingQuestions.length>0&&<section><h3>提问</h3>{matchingQuestions.map(({doc,thread,message,index})=><button type="button" key={`${thread.id}-${index}`} onClick={()=>openSearchResult(doc,message.page??thread.page,thread.id)}><MessageSquareText size={16} aria-hidden="true" className="sh-result-icon"/><span className="sh-result-copy"><span>{message.content}</span><small>{title(doc)} · 第 {message.page??thread.page} 页</small></span></button>)}</section>}
           {!matchingProjects.length&&!matchingDocs.length&&!matchingQuestions.length&&<p role="status">没有找到匹配的项目、资料或提问。</p>}
         </div>}
+        <footer className="sh-search-footer"><kbd>Esc</kbd><span>关闭</span></footer>
       </div>
     </dialog>
   </section>;

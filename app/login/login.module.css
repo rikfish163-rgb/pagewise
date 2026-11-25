@@ -66,47 +66,77 @@
 
 .content h1 {
   font: 500 clamp(28px, 4vw, 38px)/1.3 var(--font-serif);
+  letter-spacing: -0.018em;
+  text-wrap: balance;
 }
 
 .intro {
-  margin: 10px 0 26px;
+  margin: 12px 0 30px;
   color: var(--muted);
-  font-size: 16px;
+  font-size: 15px;
+  line-height: 1.85;
 }
 
 .notice {
   margin-bottom: 14px;
-  padding: 9px 12px;
+  padding: 11px 14px;
   border: 1px solid var(--line);
-  border-radius: 5px;
-  background: var(--paper);
+  border-radius: var(--radius-control, 8px);
+  background: var(--glass-strong, var(--paper));
+  box-shadow: inset 0 1px 0 var(--edge-highlight, transparent);
 }
 
 .panel {
-  padding: clamp(18px, 4vw, 28px);
-  border: 1px solid var(--line);
-  border-radius: 9px;
+  position: relative;
+  isolation: isolate;
+  padding: clamp(22px, 4vw, 32px);
+  overflow: hidden;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: var(--radius-card, 14px);
   background: var(--paper);
+  box-shadow:
+    inset 0 1px 0 var(--edge-highlight, transparent),
+    var(--shadow-2, 0 18px 42px -24px rgb(36 35 31 / 0.28));
+}
+
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(90% 75% at 100% 0%, var(--accent-soft), transparent 72%),
+    linear-gradient(135deg, var(--elevated, var(--paper)), var(--paper));
+  opacity: 0.58;
+  pointer-events: none;
+}
+
+.panel > * {
+  position: relative;
+  z-index: 1;
 }
 
 .panel h2,
 .secondary h2 {
   font-size: 18px;
   font-weight: 500;
+  line-height: 1.55;
+  letter-spacing: -0.008em;
 }
 
 .methodHelp,
 .secondary p,
 .identity p {
-  margin-top: 5px;
+  margin-top: 7px;
   color: var(--muted);
+  line-height: 1.75;
 }
 
 .methods {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
-  margin-top: 18px;
+  gap: 10px;
+  margin-top: 20px;
 }
 
 .method {
@@ -115,23 +145,44 @@
   justify-content: flex-start;
   gap: 9px;
   min-height: 46px;
-  padding: 8px 11px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  font-size: 15px;
+  border-radius: var(--radius-control, 8px);
+  background: var(--glass-strong, var(--paper));
+  box-shadow: inset 0 1px 0 var(--edge-highlight, transparent);
+  font-size: 14px;
+  font-weight: 500;
   text-align: start;
+  touch-action: manipulation;
+  transition:
+    transform var(--dur-hover, 160ms) var(--ease-state, ease),
+    color var(--dur-hover, 160ms) var(--ease-state, ease),
+    background-color var(--dur-hover, 160ms) var(--ease-state, ease),
+    border-color var(--dur-hover, 160ms) var(--ease-state, ease),
+    box-shadow var(--dur-hover, 160ms) var(--ease-state, ease);
 }
 
 a.method:hover {
-  border-color: var(--accent-ink);
-  background: var(--surface);
+  border-color: var(--line-hover, var(--accent-ink));
+  background: var(--elevated, var(--surface));
   color: var(--accent-ink);
+  box-shadow:
+    inset 0 1px 0 var(--edge-highlight, transparent),
+    var(--shadow-1, 0 8px 22px -16px rgb(36 35 31 / 0.2));
+  transform: translateY(-1px);
+}
+
+a.method:active {
+  box-shadow: inset 0 1px 3px rgb(36 35 31 / 0.12);
+  transform: translateY(0) scale(0.98);
+  transition-duration: var(--dur-press, 80ms);
 }
 
 button.method:disabled {
   opacity: 1;
-  background: var(--surface);
+  background: var(--wash, var(--surface));
   color: var(--muted);
+  box-shadow: none;
 }
 
 .secondary {
@@ -146,15 +197,27 @@ button.method:disabled {
   gap: 9px;
   min-height: 44px;
   margin-top: 12px;
-  padding: 8px 12px;
+  padding: 9px 14px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-control, 8px);
+  background: var(--glass-strong, var(--paper));
   color: var(--accent-ink);
+  box-shadow: inset 0 1px 0 var(--edge-highlight, transparent);
+  font-size: 14px;
+  font-weight: 550;
+  touch-action: manipulation;
+  transition:
+    transform var(--dur-hover, 160ms) var(--ease-state, ease),
+    background-color var(--dur-hover, 160ms) var(--ease-state, ease),
+    border-color var(--dur-hover, 160ms) var(--ease-state, ease),
+    box-shadow var(--dur-hover, 160ms) var(--ease-state, ease);
 }
 
 .secondaryAction:hover:not(:disabled) {
-  border-color: var(--accent-ink);
-  background: var(--accent-soft);
+  border-color: var(--line-hover, var(--accent-ink));
+  background: var(--elevated, var(--paper));
+  box-shadow: var(--shadow-1, 0 8px 22px -16px rgb(36 35 31 / 0.2));
+  transform: translateY(-1px);
 }
 
 .secondaryAction:disabled {
@@ -165,14 +228,50 @@ button.method:disabled {
 .primary {
   margin-top: 20px;
   padding-inline: 15px;
-  border-color: transparent;
-  background: var(--accent);
+  border-color: var(--primary-border, var(--accent));
+  background: var(--primary-fill, var(--accent));
   color: var(--accent-foreground);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.28),
+    0 8px 20px -12px var(--accent-soft);
 }
 
 .primary:hover {
-  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  background: var(--primary-fill, var(--accent-hover));
   color: var(--accent-foreground);
+  box-shadow: var(--shadow-1, 0 8px 22px -16px rgb(36 35 31 / 0.2));
+  transform: translateY(-1px);
+}
+
+.secondaryAction:active:not(:disabled),
+.primary:active {
+  box-shadow: inset 0 1px 3px rgb(36 35 31 / 0.16);
+  transform: translateY(0) scale(0.98);
+  transition-duration: var(--dur-press, 80ms);
+}
+
+.shell input:not([type="hidden"]) {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: var(--radius-control, 8px);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: inset 0 1px 2px rgb(36 35 31 / 0.04);
+  transition: border-color var(--dur-hover, 160ms), box-shadow var(--dur-hover, 160ms);
+}
+
+.shell input:not([type="hidden"]):focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.shell input::placeholder {
+  color: var(--faint, var(--muted));
 }
 
 @media (min-width: 701px) {
@@ -210,7 +309,34 @@ button.method:disabled {
 }
 
 .shell :is(a, button):focus-visible {
-  outline-color: var(--accent-ink);
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+@media (pointer: coarse) {
+  .method,
+  .secondaryAction,
+  .primary {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .method,
+  .secondaryAction,
+  .primary,
+  .shell input {
+    transition: none;
+  }
+
+  a.method:hover,
+  a.method:active,
+  .secondaryAction:hover:not(:disabled),
+  .secondaryAction:active:not(:disabled),
+  .primary:hover,
+  .primary:active {
+    transform: none;
+  }
 }
 
 @media (max-width: 900px) {
