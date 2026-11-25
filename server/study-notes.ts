@@ -128,13 +128,24 @@ async function allocateNumber(db: D1Database, owner: string, requested?: number)
   return number;
 }
 
-// Older clients can still save the single notebook after the schema migration.
-// Import it once, without granting an extra study reward.
+// The previous Worker may write after migrations and before the new Worker
+// takes over. Reconcile its newer revision without granting another reward.
 async function importLegacyNotebook(db: D1Database, owner: string) {
   const id = legacyNoteId(owner);
-  if (await db.prepare('SELECT 1 FROM study_notes WHERE id=? AND owner=?').bind(id, owner).first()) return;
+  const existing = await db.prepare('SELECT revision FROM study_notes WHERE id=? AND owner=?')
+    .bind(id, owner).first<{revision: number}>();
   const old = await db.prepare('SELECT body,revision FROM notebooks WHERE owner=?').bind(owner)
     .first<{body: string; revision: number}>();
+  if (existing) {
+    if (old && old.revision > existing.revision) {
+      await db.prepare(`UPDATE study_notes SET body=?,revision=?,write_token=?,updated_at=?
+        WHERE id=? AND owner=? AND revision<?
+          AND EXISTS(SELECT 1 FROM notebooks WHERE owner=? AND revision=? AND body=?)`)
+        .bind(old.body, old.revision, crypto.randomUUID(), Date.now(), id, owner, old.revision,
+          owner, old.revision, old.body).run();
+    }
+    return;
+  }
   if (!old?.body) return;
   const number = await allocateNumber(db, owner);
   await db.prepare(`INSERT INTO study_notes(id,owner,number,title,body,revision,write_token,created_at,updated_at)
@@ -228,16 +239,19 @@ export async function handleNotes(request: Request, path: string[], db: D1Databa
       return reply({note: (await readNotes(db, owner, previous.id))[0]});
     }
     const now = Date.now();
+    const legacy = noteId === legacyNoteId(owner);
     if (input.number !== undefined) await allocateNumber(db, owner, number);
     const action = previous
       ? db.prepare(`UPDATE study_notes SET number=?,title=?,body=?,revision=revision+1,write_token=?,updated_at=?
-        WHERE id=? AND owner=? AND revision=?`)
-        .bind(number, cleanTitle, body, token, now, noteId, owner, input.revision)
+        WHERE id=? AND owner=? AND revision=?${legacy
+          ? ' AND NOT EXISTS(SELECT 1 FROM notebooks WHERE owner=? AND revision>?)' : ''}`)
+        .bind(number, cleanTitle, body, token, now, noteId, owner, input.revision,
+          ...(legacy ? [owner, input.revision] : []))
       : db.prepare(`INSERT INTO study_notes(id,owner,number,title,body,revision,write_token,created_at,updated_at)
         VALUES(?,?,?,?,?,1,?,?,?) ON CONFLICT(id) DO NOTHING`)
         .bind(noteId, owner, number, cleanTitle, body, token, now, now);
     const following = sourceWrites(db, owner, noteId as string, token, sources);
-    if (noteId === legacyNoteId(owner)) following.push(db.prepare(`UPDATE notebooks SET body=?,revision=?
+    if (legacy) following.push(db.prepare(`UPDATE notebooks SET body=?,revision=?
       WHERE owner=? AND EXISTS(SELECT 1 FROM study_notes WHERE id=? AND owner=? AND write_token=?)`)
       .bind(body, Number(input.revision) + 1, owner, noteId, owner, token));
     const saved = await persistWithCredit(db, action, owner, 'note_saved', noteId as string,

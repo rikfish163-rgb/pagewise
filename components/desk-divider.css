@@ -1,11 +1,78 @@
-.desk-divider{position:absolute;z-index:4;inset-block:0;right:calc(var(--panel-track) - 6px);width:12px;cursor:col-resize;touch-action:none;outline:none}
-.desk-divider::before,.desk-divider::after{content:'';position:absolute;left:50%;transform:translateX(-50%);border-radius:4px}
-.desk-divider::before{top:0;bottom:0;width:2px;background:transparent}
-.desk-divider::after{top:calc(50% - 16px);height:32px;width:3px;background:var(--rail)}
-.desk-divider:hover::before,.desk-divider:focus-visible::before,.desk[data-resizing] .desk-divider::before{background:var(--accent)}
-.desk-divider:hover::after,.desk-divider:focus-visible::after,.desk[data-resizing] .desk-divider::after{background:var(--accent-ink)}
-.desk[data-resizing]{user-select:none;cursor:col-resize}
-@media(max-width:650px){.desk-divider{display:none}}
+.desk-divider {
+  position: absolute;
+  z-index: 4;
+  inset-block: 0;
+  right: calc(var(--panel-track) - 6px);
+  width: 12px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
 
-.shelf-divider{right:auto;left:calc(var(--shelf) - 6px)}
-@media(max-width:950px){.shelf-divider{display:none}}
+.desk-divider::before,
+.desk-divider::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  transition:
+    background-color var(--dur-hover) var(--ease-state),
+    box-shadow var(--dur-hover) var(--ease-state),
+    opacity var(--dur-hover) var(--ease-state);
+}
+
+.desk-divider::before {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+
+.desk-divider::after {
+  top: calc(50% - 16px);
+  width: 3px;
+  height: 32px;
+  background: var(--line-strong);
+  opacity: .58;
+}
+
+.desk-divider:is(:hover, :focus-visible)::before,
+.desk[data-resizing] .desk-divider::before {
+  background: var(--accent);
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--accent) 9%, transparent),
+    0 0 12px color-mix(in oklab, var(--accent) 24%, transparent);
+}
+
+.desk-divider:is(:hover, :focus-visible)::after,
+.desk[data-resizing] .desk-divider::after {
+  background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 26%, transparent);
+  opacity: 1;
+}
+
+.desk[data-resizing] { cursor: col-resize; user-select: none; }
+.shelf-divider { right: auto; left: calc(var(--shelf) - 6px); }
+
+@media (max-width: 1169px) {
+  .shelf-divider { display: none; }
+}
+
+@media (max-width: 959px) {
+  .desk-divider { display: none; }
+}
+
+@media (max-width: 650px) {
+  .desk-divider { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desk-divider::before,
+  .desk-divider::after { transition: none; }
+
+  .desk-divider:is(:hover, :focus-visible)::before,
+  .desk[data-resizing] .desk-divider::before,
+  .desk-divider:is(:hover, :focus-visible)::after,
+  .desk[data-resizing] .desk-divider::after { box-shadow: none; }
+}
