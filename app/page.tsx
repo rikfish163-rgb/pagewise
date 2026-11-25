@@ -16,5 +16,5 @@ export default async function Home({searchParams}:{searchParams:Promise<Record<s
     const target=params.size?'/?'+params+'#reader':'/';
     redirect('/login?return_to='+encodeURIComponent(target));
   }
-  return <Workspace showAdmin={account.admin} accountSource={account.source}/>;
+  return <Workspace showAdmin={account.admin} accountSource={account.source} accountKey={account.userId}/>;
 }

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import Reader from './ReaderBoundary';
 import Notebook from './NotebookBoundary';
 import type {NotebookView} from './Notebook';
-import {currentNoteSource, noteNumber, type NotebookInsert, type NotebookInsertResult, type NoteSource, type NoteSourceInput, type StudyNote} from '@/lib/notebook-model';
+import {currentNoteSource, noteNumber, type NotebookInsert, type NotebookInsertResult, type NoteSaveChoice, type NoteSaveIntent, type NoteSource, type NoteSourceInput, type StudyNote} from '@/lib/notebook-model';
+import NoteSaveDialog, {type NoteSaveReceipt} from './NoteSaveDialog';
 import Shelf from './Shelf';
 import {MagpieModelPicker,localAnswer,localMemoryTask,type Gateway} from './Magpie';
 import {combineImages,documentOverview,isOverview,requestedPages,type PageReader} from './study-context';
@@ -26,9 +27,16 @@ import { chargeLimit, creditNumber, useStudyCredits } from './useStudyCredits';
 import {CircleUserRound, LibraryBig, NotebookPen, Search} from 'lucide-react';
 import './workspace-nav.css';
 /* Selection previews are local data URLs, not remotely optimized images. */
-import { dismissSelection, discussionTitle, latestQuestionTime, questionTime, documentThreads, selectionLabel, updateThread, type Discussion, type Selection, type StudyDoc } from '@/lib/workspace-model';
+import { dismissSelection, discussionTitle, discussionTopic, latestQuestionTime, questionTime, documentThreads, selectionLabel, updateThread, type Discussion, type MessageSource, type Selection, type StudyDoc } from '@/lib/workspace-model';
+import { citationFeedback, citationLimitFeedback, MAX_MESSAGE_SOURCES, messageSources, selectionSources } from '@/lib/workspace-sources';
+import { discussionNoteBlocks, roundSourceLines } from '@/lib/workspace-notes';
+import { draftForThread, draftStorageKey, draftsForDoc, emptyDraftBook, parseDraftBook, removeDraft, saveDraft, type DraftBook, type WorkspaceDraft } from '@/lib/workspace-drafts';
+import { parseWorkspaceRoute, workspaceRouteUrl } from '@/lib/workspace-route';
+import { practicePrompt } from '@/lib/practice-draft';
 
 const sample: StudyDoc = { id:'sample',name:'采样与混叠.pdf',kind:'pdf',course:'信号与系统' };
+/* Stable identity keeps draft persistence from re-running on every render. */
+const EMPTY_CITATIONS:CitationItem[]=[];
 const processingTiers={default:'标准',fast:'Fast',priority:'Fast',ultrafast:'Ultrafast',flex:'Flex',scale:'Scale'};
 function processingLabel(processing:TutorProcessing){
  const model=TUTOR_MODELS.find(item=>item.id===processing.model)?.label??processing.model??'模型未记录';
@@ -43,6 +51,35 @@ function processingDetails(processing:TutorProcessing){
  const timing=processing.timingSource==='provider'?'OpenAI 处理耗时':'站点实测请求耗时';
  return processing.message+' '+processing.answerTokens+' 个输出 token（已扣除推理用量） ÷ '+(processing.durationMs/1000).toFixed(3)+' 秒（'+timing+'）。';
 }
+export type CitationItem = Selection & {attachmentId?: string; fromAnswer?: boolean};
+/** Appended evidence for the current turn: every chip is visible, locatable and removable. */
+export function CitationChips({items,disabled,notice,onLocate,onRemove,onPreview}:{
+ items:CitationItem[]; disabled:boolean; notice?:string;
+ onLocate:(item:Selection)=>void; onRemove:(attachmentId:string)=>void; onPreview:(item:Selection)=>void;
+}){
+ if(!items.length&&!notice)return null;
+ return <>
+  {items.some(item=>!!item.image)&&<div className="screenshot-attachments" aria-label="截图附件">{items.map(item=>item.image?<figure key={item.attachmentId}>
+    <button type="button" className="screenshot-preview" onClick={()=>onPreview(item)} aria-label={`预览第 ${item.page} 页截图`}><img src={item.image} alt="" /><figcaption>第 {item.page} 页</figcaption></button>
+    <button type="button" className="screenshot-remove" disabled={disabled} onClick={()=>item.attachmentId&&onRemove(item.attachmentId)} aria-label={`删除第 ${item.page} 页截图`}>×</button>
+  </figure>:null)}</div>}
+  {items.map(item=>!item.image?<div className="citation-chip" key={item.attachmentId} title={item.text}>
+    <button type="button" className="citation-locate" aria-label={`定位第 ${item.page} 页：${item.text}`} onClick={()=>onLocate(item)}><small>P{item.page}</small><span>{item.text}</span></button>
+    <button type="button" className="citation-remove" disabled={disabled} onClick={()=>item.attachmentId&&onRemove(item.attachmentId)} aria-label={`移除引用：${item.text}`}>×</button>
+  </div>:null)}
+  {notice&&<p className="citation-notice" role="status">{notice}</p>}
+ </>;
+}
+/** Per-round evidence under an answer. Legacy rounds name their own question page. */
+export function AnswerSources({sources,legacy,onLocate}:{sources:MessageSource[]; legacy:boolean; onLocate:(page:number)=>void}){
+ if(!sources.length)return null;
+ return <div className="answer-sources" aria-label={legacy?'本轮起点页':'本轮引用页'}>
+  <span>{legacy?'本轮起点':'本轮引用'}</span>
+  {sources.map((source,index)=><button type="button" key={`${source.page}-${index}`} title={source.text} onClick={()=>onLocate(source.page)}>
+   <small>P{source.page}</small>{source.text&&<span>{source.text}</span>}
+  </button>)}
+ </div>;
+}
 const paths: Record<string,string> = { book:'M3 4h6c2 0 3 1 3 2v15c0-2-1-3-3-3H3z M21 4h-6c-2 0-3 1-3 2v15c0-2 1-3 3-3h6z', plus:'M12 5v14M5 12h14', close:'m6 6 12 12M18 6 6 18', send:'m5 12 7-7 7 7M12 5v15', file:'M14 3H5v18h14V8zM14 3v6h5M8 13h8M8 17h5', trash:'M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7', chevron:'m9 5 7 7-7 7', chat:'M4 4h16v13H9l-5 4zM8 9h8M8 13h5', lock:'M6 10h12v11H6zM8 10V7a4 4 0 0 1 8 0v3', menu:'M4 6h16M4 12h16M4 18h16', back:'m14 5-7 7 7 7', arrow:'M5 12h14m-6-6 6 6-6 6', upload:'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6' };
 function Icon({name,size=18}:{name:string;size?:number}) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]||paths.file}/></svg>; }
 class QuoteChangedError extends Error {}
@@ -55,7 +92,7 @@ async function request<T>(url:string, init?:RequestInit):Promise<T> {
 const json=(body:unknown)=>({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 const loadProjectMemory=(project:string)=>request<ProjectMemoryView>('/memory?course='+encodeURIComponent(project));
 const memoryPreference='pagewise:automatic-memory';
-export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{showAdmin?:boolean;accountSource?:'chatgpt'|'oidc'}){
+export default function Workspace({showAdmin=false,accountSource='chatgpt',accountKey=''}:{showAdmin?:boolean;accountSource?:'chatgpt'|'oidc';accountKey?:string}){
  const credits=useStudyCredits();
  const [failedAsks,setFailedAsks]=useState<Record<string,{question:string;signature:string;cap:number;sent:boolean}>>({});
  const [receipts,setReceipts]=useState<Record<string,string>>({});
@@ -133,9 +170,13 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
      requestReaderPage(sourcePage??lastPage(item.id),sourcePage===undefined);
      const draft=threads.find(thread=>thread.docId===item.id&&!thread.messages.length&&((thread.image&&!omitImage[thread.id])||thread.text||extras[thread.id]?.length||questions[thread.id]?.trim()));
      if(draft){setActive(draft.id);setTab('discussions');}
-     else newQuestion();
+     else {
+       const stored=draftsForDoc(draftsRef.current,item.id)[0];
+       if(stored)applyDraft(stored,{known:threads});
+       else newQuestion();
+     }
    }else if(sourcePage!==undefined){requestReaderPage(sourcePage);}
-   if(threadId)setActive(threadId);
+   if(threadId){setActive(threadId);setTab('discussions');const saved=draftForThread(draftsRef.current,threadId);if(saved)applyDraftContent(saved);}
    setMobilePanel(!!threadId);navigate(true);void organize(item,{visit:true});
  }
  function openImport(project?:string){
@@ -150,10 +191,15 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const [savedProjects,setSavedProjects]=useState<string[]>([]);
  const [docs,setDocs]=useState<StudyDoc[]>([]),[threads,setThreads]=useState<Discussion[]>([]),[docId,setDocId]=useState('sample'),[active,setActive]=useState('draft-initial'),[page,setPage]=useState(1);
  const [questions,setQuestions]=useState<Record<string,string>>({}),[pending,setPending]=useState<Record<string,boolean>>({}),[errors,setErrors]=useState<Record<string,string>>({});
+ const [draftBook,setDraftBook]=useState<DraftBook>(emptyDraftBook());
+ const draftsRef=useRef<DraftBook>(emptyDraftBook());
+ const draftsReady=useRef(false);
  const [cropPending,setCropPending]=useState(false);
  const [tab,setTab]=useState<'discussions'|'memory'|'note'>('discussions'),[upload,setUpload]=useState(false),[uploading,setUploading]=useState(false),[course,setCourse]=useState('信号与系统'),[file,setFile]=useState<File|null>(null),[error,setError]=useState(''),[library,setLibrary]=useState(false),[mobilePanel,setMobilePanel]=useState(false);
  const [remove,setRemove]=useState<{kind:'doc'|'thread';id:string;name:string}|null>(null),[deleting,setDeleting]=useState(false);
- const [quote,setQuote]=useState('');const [threadSearch,setThreadSearch]=useState('');useEffect(()=>setQuote(''),[active]);
+ const [quote,setQuote]=useState('');const [threadSearch,setThreadSearch]=useState('');const [citationNotice,setCitationNotice]=useState('');
+ const [practiceDrafts,setPracticeDrafts]=useState<Record<string,boolean>>({});
+ useEffect(()=>{setQuote('');setCitationNotice('');},[active]);
  const lookup=useRef<PageReader|null>(null);
  const currentDocumentId=useRef(docId);
  currentDocumentId.current=docId;
@@ -165,7 +211,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
    }
  },[]);
  const cropTargets=useRef(new Map<string,{docId:string;activeId:string;question:string}>());
- const returnLocation=useRef<{docId:string;location:ReturnType<PageReader['getLocation']>;tab:typeof tab;panelOpen:boolean}|null>(null);
+ const returnLocation=useRef<{docId:string;location:ReturnType<PageReader['getLocation']>;tab:typeof tab;panelOpen:boolean;threadId:string}|null>(null);
  const restoreAfterReaderReady=useRef<{docId:string;location:ReturnType<PageReader['getLocation']>}|null>(null);
  const [canReturnToReading,setCanReturnToReading]=useState(false);
  const [connection,setConnection]=useState<Gateway|null>(null),[gatewayActive,setGatewayActive]=useState(false),[collapsed,collapse]=useState(true);
@@ -263,38 +309,50 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const [inserts,setInserts]=useState<NotebookInsert[]>([]);
  const noteInsertId=useRef(0);
  const [noteResults,setNoteResults]=useState<Record<number,NotebookInsertResult>>({});
+ const [saveIntent,setSaveIntent]=useState<NoteSaveIntent|null>(null);
+ const [saveBusy,setSaveBusy]=useState(false);
+ const [saveReceipt,setSaveReceipt]=useState<NoteSaveReceipt|undefined>(undefined);
+ const saveInsert=useRef<number|null>(null);
  const onNoteInsertResult=useCallback((result:NotebookInsertResult)=>{
    setNoteResults(previous=>({...previous,[result.id]:result}));
+   if(saveInsert.current!==result.id)return;
+   setSaveReceipt({status:result.status,...(result.noteId?{noteId:result.noteId}:{}),...(result.noteTitle?{noteTitle:result.noteTitle}:{}),...(result.noteNumber?{noteNumber:result.noteNumber}:{}),...(result.error?{error:result.error}:{})});
+   if(result.status!=='saving')setSaveBusy(false);
  },[]);
- const [noteSummaries,setNoteSummaries]=useState<Pick<StudyNote,'id'|'number'|'title'|'sources'>[]>([]);
- const onNotesChange=useCallback((notes:StudyNote[])=>{
-   const next=notes.map(({id,number,title,sources})=>({id,number,title,sources}));
-   setNoteSummaries(previous=>JSON.stringify(previous)===JSON.stringify(next)?previous:next);
+ const [notes,setNotes]=useState<StudyNote[]>([]);
+ const onNotesChange=useCallback((next:StudyNote[])=>{
+   setNotes(previous=>JSON.stringify(previous)===JSON.stringify(next)?previous:next);
  },[]);
  const [creatingConversationNote,setCreatingConversationNote]=useState(false);
  const latestInsert=inserts.at(-1);
  const latestNoteResult=latestInsert?noteResults[latestInsert.id]:undefined;
  const [extras,setExtras]=useState<Record<string,(Selection & {fromAnswer?:boolean;attachmentId:string})[]>>({});
  const [attachmentReads,setAttachmentReads]=useState<Record<string,number>>({});
- const citations=extras[active]||[];
+ const citations=extras[active]??EMPTY_CITATIONS;
  const [omitPrimary,setOmitPrimary]=useState<Record<string,boolean>>({});
  const [omitImage,setOmitImage]=useState<Record<string,boolean>>({});
  function addCitation(id:string,selection:Selection & {fromAnswer?:boolean}){
    const current=extras[id]||[];
-   if(current.length+(attachmentReads[id]??0)>=12)return false;
+   const primary=id===active?(primaryImage?1:0)+(primaryTextVisible?1:0):0;
+   if(current.length+(attachmentReads[id]??0)+primary>=MAX_MESSAGE_SOURCES){
+     if(id===active)setCitationNotice(citationLimitFeedback());
+     return false;
+   }
    attempts.current.delete(id);
    setExtras(v=>({...v,[id]:[...(v[id]||[]),{...selection,attachmentId:crypto.randomUUID()}]}));
+   if(id===active)setCitationNotice(citationFeedback(1,current.length+1+primary));
    return true;
  }
  async function addImageAttachments(files:File[],pasted=false){
    if(!files.length||sending.current.has(active))return;
    const images=files.filter(file=>['image/png','image/jpeg','image/webp'].includes(file.type));
    const supported=images.filter(file=>file.size>0&&file.size<=8*1024*1024);
-   const remaining=Math.max(0,12-citations.length-(attachmentReads[active]??0));
+   const primary=(primaryImage?1:0)+(primaryTextVisible?1:0);
+   const remaining=Math.max(0,MAX_MESSAGE_SOURCES-citations.length-(attachmentReads[active]??0)-primary);
    const accepted=supported.slice(0,remaining);
    if(images.length!==files.length)setError('请添加 PNG、JPEG 或 WebP 图片。');
    else if(supported.length!==images.length)setError('图片必须非空，且每张最多 8 MiB。');
-   else if(accepted.length<supported.length)setError('每次提问最多添加 12 个引用。');
+   else if(accepted.length<supported.length){setError(citationLimitFeedback());setCitationNotice(citationLimitFeedback());}
    if(!accepted.length)return;
 
    setAttachmentReads(reads=>({...reads,[active]:(reads[active]??0)+accepted.length}));
@@ -308,6 +366,8 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
      for(const image of result){
        if(image.status==='fulfilled')addCitation(active,image.value);
      }
+     const added=result.filter(image=>image.status==='fulfilled').length;
+     if(added)setCitationNotice(citationFeedback(added,citations.length+added+primary));
      if(result.some(image=>image.status==='rejected'))setError('有图片读取失败，请重新添加。');
    }finally{
      setAttachmentReads(reads=>({...reads,[active]:(reads[active]??0)-accepted.length}));
@@ -350,7 +410,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const discussionSeen=useRef('');
  const [unseenReply,setUnseenReply]=useState(false);
  const question=questions[active]||''; const setQuestion=(value:string)=>setQuestions(v=>({...v,[active]:value}));
- const doc=docs.find(d=>d.id===docId)||sample; const allItems=documentThreads(threads,doc.id); const items=allItems.filter(t=>t.messages.length>0||noteSummaries.some(note=>note.sources.some(source=>source.threadId===t.id))); const existing=allItems.find(t=>t.id===active); const thread:Discussion=existing??{id:active,docId:doc.id,page,messages:[]}; const currentPending=!!pending[active];
+ const doc=docs.find(d=>d.id===docId)||sample; const allItems=documentThreads(threads,doc.id); const items=allItems.filter(t=>t.messages.length>0||notes.some(note=>note.sources.some(source=>source.threadId===t.id))); const existing=allItems.find(t=>t.id===active); const thread:Discussion=existing??{id:active,docId:doc.id,page,messages:[]}; const currentPending=!!pending[active];
  const primaryImage=omitImage[active]?undefined:thread?.image;
  const croppedImageCount=(primaryImage?1:0)+citations.filter(item=>!!item.image).length;
  const primaryTextVisible=!!thread.text&&thread.text!=='按页提问'&&!omitPrimary[active];
@@ -360,6 +420,71 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const priceLabel=replayQuestion?replayLabel:newAnswerPrice;
  const ready=!!gateway||(personal?(!primaryImage||personalVision):availability.ready);
  function removePrimaryImage(){attempts.current.delete(active);setOmitImage(value=>({...value,[active]:true}));}
+ function writeDraftBook(update:(book:DraftBook)=>DraftBook){
+   setDraftBook(current=>{
+     const next=update(current);
+     draftsRef.current=next;
+     try{localStorage.setItem(draftStorageKey(accountKey),JSON.stringify(next));}catch{ /* Drafts stay in memory for this session. */ }
+     return next;
+   });
+ }
+ useEffect(()=>{
+   try{draftsRef.current=parseDraftBook(localStorage.getItem(draftStorageKey(accountKey)));}
+   catch{draftsRef.current=emptyDraftBook();}
+   setDraftBook(draftsRef.current);
+   draftsReady.current=true;
+ },[accountKey]);
+ useEffect(()=>{
+   if(!draftsReady.current)return;
+   const hasContent=!!question.trim()||citations.length>0||!!thread.image||!!(thread.text&&thread.text!=='按页提问');
+   const draft:WorkspaceDraft={docId:doc.id,threadId:active,text:question,
+     selection:{page:thread.page,...(thread.text&&thread.text!=='按页提问'?{text:thread.text}:{}),...(thread.rect?{rect:thread.rect}:{}),...(thread.image?{image:thread.image}:{})},
+     citations:citations.map(item=>({page:item.page,text:item.text,rect:item.rect,kind:item.image?'attachment' as const:'selection' as const})),
+     omitPrimary:!!omitPrimary[active],omitImage:!!omitImage[active],imageLost:false,updatedAt:Date.now()};
+   writeDraftBook(book=>hasContent?saveDraft(book,draft):removeDraft(book,active));
+ },[active,question,citations,doc.id,thread.page,thread.text,thread.rect,thread.image,omitPrimary[active],omitImage[active],accountKey]);
+ useEffect(()=>{
+   if(!libraryLoaded)return;
+   const hash=notebookOpen?'#notebook':home?'#home':'#reader';
+   const route={document:docId,...(active&&!active.startsWith('draft-')?{discussion:active}:{}),...(Number.isSafeInteger(page)&&page>0?{page}:{})};
+   const next=workspaceRouteUrl({pathname:window.location.pathname,hash},route);
+   if(window.location.pathname+window.location.search+window.location.hash!==next)window.history.replaceState(null,'',next);
+ },[libraryLoaded,docId,active,page,home,notebookOpen]);
+ function applyDraftContent(draft:WorkspaceDraft){
+   setQuestions(value=>({...value,[draft.threadId]:draft.text}));
+   setExtras(value=>({...value,[draft.threadId]:draft.citations.map(item=>({...item,attachmentId:crypto.randomUUID()}))}));
+   setOmitPrimary(value=>({...value,[draft.threadId]:draft.omitPrimary}));
+   setOmitImage(value=>({...value,[draft.threadId]:draft.omitImage}));
+ }
+ function applyDraft(draft:WorkspaceDraft,{moveReader=false,known}:{moveReader?:boolean;known?:Discussion[]}={}){
+   const list=known??threads;
+   if(!draft.threadId.startsWith('draft-')&&!list.some(item=>item.id===draft.threadId))return false;
+   setThreads(current=>current.some(item=>item.id===draft.threadId)?current:[...current,{id:draft.threadId,docId:draft.docId,page:draft.selection?.page??1,messages:[],
+     ...(draft.selection?.text?{text:draft.selection.text}:{}),...(draft.selection?.rect?{rect:draft.selection.rect}:{})}]);
+   setActive(draft.threadId);
+   applyDraftContent(draft);
+   if(moveReader&&draft.selection?.page)requestReaderPage(draft.selection.page);
+   return true;
+ }
+ // Restoring text and citations must not move the reader: the saved reading
+ // position (resume) already decided where the student was.
+ function restoreDraft(docId:string,known:Discussion[],preferred?:string){
+   const direct=preferred?draftForThread(draftsRef.current,preferred):undefined;
+   if(direct)return applyDraft(direct,{known});
+   if(preferred&&!preferred.startsWith('draft-'))return false;
+   const fallback=draftsForDoc(draftsRef.current,docId)[0];
+   if(!fallback)return false;
+   return applyDraft(fallback,{known});
+ }
+ function openDraft(draft:WorkspaceDraft){
+   setDocId(draft.docId);
+   if(!applyDraft(draft,{moveReader:true})){
+     writeDraftBook(book=>removeDraft(book,draft.threadId));
+     setError('这条讨论已删除，未发送的草稿已移除。');
+     return;
+   }
+   setTab('discussions');setMobilePanel(true);
+ }
  function captureCrop(selection:Selection & {captureId?:string}){
    const {captureId,...screenshot}=selection;
    const target=(captureId?cropTargets.current.get(captureId):undefined)??{docId:doc.id,activeId:active,question};
@@ -390,7 +515,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
      attempts.current.delete(id);
      return true;
    }
-   if(targetCitations.length+(attachmentReads[id]??0)>=12)return false;
+   if(targetCitations.length+(attachmentReads[id]??0)+(existingTarget?.image&&!omitImage[id]?1:0)+(existingTarget?.text&&existingTarget.text!=='按页提问'&&!omitPrimary[id]?1:0)>=MAX_MESSAGE_SOURCES)return false;
    const imageNumber=(existingTarget?.image&&!omitImage[id]?1:0)+targetCitations.filter(item=>!!item.image).length+1;
    return addCitation(id,{...screenshot,text:`截图 ${imageNumber}`});
  }
@@ -411,24 +536,22 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
    request<{docs:StudyDoc[];threads:Discussion[];projects?:string[]}>('/state').then(state=>{
      if(!current)return;
      setDocs(state.docs);setThreads(state.threads);setSavedProjects(state.projects??[]);
-     const params=new URLSearchParams(window.location.search);
-     const source=params.get('document');
+     const route=parseWorkspaceRoute(window.location.search);
+     const source=route.document;
      const recent=[...state.docs].sort((a,b)=>(b.visited||0)-(a.visited||0))[0];
      const readerId=source??(window.location.hash==='#reader'?recentReader():null);
      const previous=readerId==='sample'?sample:state.docs.find(item=>item.id===readerId);
      const target=source?previous:previous??recent;
      if(target){
-       const sheet=Number(params.get('page'));
        setDocId(target.id);
-       const deepLink=!!source&&Number.isSafeInteger(sheet)&&sheet>0;
-       requestReaderPage(deepLink?sheet:lastPage(target.id),!deepLink);
-       if(source){
-         const linked=state.threads.find(t=>t.docId===target.id&&t.id===params.get('discussion'));
-         if(linked)setActive(linked.id);
-         window.history.replaceState(null,'',window.location.pathname+'#reader');setHome(false);
-       }
+       const deepLink=!!route.page;
+       requestReaderPage(route.page??lastPage(target.id),!deepLink);
+       const linked=route.discussion?state.threads.find(t=>t.docId===target.id&&t.id===route.discussion):undefined;
+       if(linked)setActive(linked.id);
+       restoreDraft(target.id,state.threads,route.discussion);
+       if(source)setHome(false);
      }else if(source){
-       window.history.replaceState(null,'',window.location.pathname+'#home');setHome(true);
+       setHome(true);
        setError('当前账户的资料库中找不到这份讲义。');
      }
      setLibraryLoaded(true);
@@ -459,9 +582,33 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const hasAnswer=thread.messages.some(message=>message.role==='assistant');
  const excerpts=[...(primaryTextVisible&&!thread.image?[{page:thread.page,text:thread.text}]:[]),...citations.filter(item=>!item.fromAnswer)]
    .filter((item):item is Selection & {text:string}=>!('image' in item && item.image)&&!!item.text?.trim());
+ function beginNoteSave(intent:NoteSaveIntent){
+   saveInsert.current=null;setSaveReceipt(undefined);setSaveBusy(false);setSaveIntent(intent);
+ }
+ function closeNoteSave(){setSaveIntent(null);setSaveReceipt(undefined);setSaveBusy(false);saveInsert.current=null;}
+ async function confirmNoteSave(choice:NoteSaveChoice){
+   if(!saveIntent||saveBusy)return;
+   setSaveBusy(true);
+   try{
+     const sourceDoc=doc.id==='sample'?{...doc,id:await ensureSample()}:doc;
+     const text=saveIntent.text.replace(/([?&])document=sample(?=[&)#])/g,'$1document='+sourceDoc.id);
+     const sources=saveIntent.sources.map(source=>source.docId==='sample'?{...source,docId:sourceDoc.id}:source);
+     const insert:NotebookInsert={id:++noteInsertId.current,
+       noteId:choice.mode==='append'?choice.noteId:crypto.randomUUID(),
+       title:saveIntent.title,text,sources,mode:choice.mode};
+     saveInsert.current=insert.id;
+     setSaveReceipt({status:'saving'});
+     setInserts(previous=>[...previous,insert]);
+   }catch(error){setSaveBusy(false);setSaveReceipt({status:'error',error:(error as Error).message});}
+ }
+ function noteSourcesForDiscussion():NoteSourceInput[]{
+   return [currentNoteSource(doc,thread),...thread.messages.flatMap((message,index)=>
+     messageSources(message,doc.id,thread.messages[index-1]?.page)).map(source=>({project:doc.course,docId:doc.id,...(!thread.id.startsWith('draft-')?{threadId:thread.id}:{}),page:source.page}))];
+ }
  function saveExcerpts(){
    const blocks=excerpts.map(item=>noteSource(item.page)+'\n\n'+item.text.split(/\r?\n/).map(line=>'> '+line).join('\n'));
-   appendNote(['## '+noteHeading+' · 讲义摘录',...blocks]);
+   beginNoteSave({kind:'selection',title:noteHeading+' · 讲义摘录',text:blocks.join('\n\n'),
+     sources:excerpts.map(item=>({project:doc.course,docId:doc.id,...(!thread.id.startsWith('draft-')?{threadId:thread.id}:{}),page:item.page}))});
  }
  async function appendNote(blocks:string[],sources?:NoteSourceInput[],title?:string){
    try{
@@ -505,8 +652,9 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
    finally{setCreatingConversationNote(false);}
  }
  function saveDiscussion(){
-   appendNote(['## '+noteHeading+' · 讨论笔记',noteSource(thread.page),
-     ...thread.messages.map(message=>(message.role==='user'?'### 问题':'### 回答')+'\n\n'+message.content)]);
+   beginNoteSave({kind:'discussion',title:noteHeading+' · 讨论笔记',
+     text:discussionNoteBlocks(thread,doc.id,{heading:noteHeading,link:noteSource}).join('\n\n'),
+     sources:noteSourcesForDiscussion()});
  }
  function addAnswerQuote(){
    addCitation(active,{page,text:'引自讲解：'+quote,fromAnswer:true});
@@ -517,20 +665,22 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  function select(s:Selection,action:'ask'|'add'|'save'='ask'){
    if(action==='save'){
      if(!s.text)return;
-     appendNote(['## '+doc.name+' · 第 '+s.page+' 页',noteSource(s.page),...s.text.split(/\r?\n/).map(line=>'> '+line)]);
-     openMarginNotes(undefined,false);return;
+     beginNoteSave({kind:'selection',title:doc.name+' · 第 '+s.page+' 页',
+       text:s.text.split(/\r?\n/).map(line=>'> '+line).join('\n'),
+       sources:[{project:doc.course,docId:doc.id,...(!thread.id.startsWith('draft-')?{threadId:thread.id}:{}),page:s.page}]});
+     return;
    }
    if(action==='add'){
-     if(existing&&currentPending){const id='draft-'+crypto.randomUUID();setActive(id);setThreads(v=>[...v,{...s,id,docId:doc.id,messages:[]}]);}
+     if(existing&&currentPending){const id='draft-'+crypto.randomUUID();setActive(id);setThreads(v=>[...v,{...s,id,docId:doc.id,messages:[]}]);setCitationNotice(citationFeedback(1,1));}
      else if(existing)addCitation(active,s);
-     else setThreads(v=>[...v,{...s,id:active,docId:doc.id,messages:[]}]);
+     else{setThreads(v=>[...v,{...s,id:active,docId:doc.id,messages:[]}]);setCitationNotice(citationFeedback(1,1));}
    }else{
      const id='draft-'+crypto.randomUUID();setThreads(v=>[...v,{...s,id,docId:doc.id,messages:[]}]);setActive(id);
    }
    setTab('discussions');setMobilePanel(true);
  }
  function captureReadingPosition(){
-   if(!returnLocation.current&&lookup.current){returnLocation.current={docId:currentDocumentId.current,location:lookup.current.getLocation(),tab,panelOpen:mobilePanel};setCanReturnToReading(true);}
+   if(!returnLocation.current&&lookup.current){returnLocation.current={docId:currentDocumentId.current,location:lookup.current.getLocation(),tab,panelOpen:mobilePanel,threadId:active};setCanReturnToReading(true);}
  }
  function locateSource(item:StudyDoc,sourcePage:number){
    captureReadingPosition();
@@ -562,6 +712,8 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  function openThread(t:Discussion,sourcePage=t.page){
    captureReadingPosition();
    setDocId(t.docId);requestReaderPage(sourcePage);setActive(t.id);setTab('discussions');setMobilePanel(true);
+   const saved=draftForThread(draftsRef.current,t.id);
+   if(saved)applyDraftContent(saved);
  }
  function returnToReading(){
    const target=returnLocation.current;
@@ -574,7 +726,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
        setPage(target.location.page);
      }
    }
-   if(target){setTab(target.tab);setMobilePanel(target.panelOpen);}
+   if(target){setActive(target.threadId);setTab(target.tab);setMobilePanel(target.panelOpen);}
    returnLocation.current=null;setCanReturnToReading(false);
  }
  function openProjectMemory(project:string){
@@ -599,6 +751,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
 
  let sentPaidAsk=false;
  let savedAnswer=false;
+ let roundSources:MessageSource[]=[];
  const primaryText=omitPrimary[key]?undefined:snapshot.text;
  try{
  let context='',sourcePage=snapshot.page,visual:string|undefined;
@@ -622,8 +775,17 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  const attachment=await combineImages([...(imageSnapshot&&(pictures.length||gateway)?[imageSnapshot]:[]),...pictures]);
  if(personal&&!gateway&&!personalVision&&attachment&&(citationSnapshot.some(s=>s.image)||extracts.some(s=>!s.text?.trim())))throw Error('请选用支持图片输入的模型。');
  visual=personal&&!gateway&&!personalVision?undefined:attachment;
- operation.body={requestId:operation.requestId,question:q,context,sourcePage,omitPrimaryText:!!omitPrimary[key],omitPrimaryImage:!!omitImage[key],attachment:visual,...(!freeQuestion&&{maxCredits:answerLimit}),...(personal?{source:'personal',revision:personal.revision,model:personalModel}:settings)};
+ const sourceDocId=snapshot.docId==='sample'?await ensureSample():snapshot.docId;
+ const pageLimit=reader?.count??0;
+ roundSources=selectionSources([
+   ...(primaryText&&primaryText!=='按页提问'?[{page:snapshot.page,text:primaryText,kind:'selection' as const}]:[]),
+   ...(imageSnapshot?[{page:snapshot.page,rect:snapshot.rect,kind:'attachment' as const}]:[]),
+   ...citationSnapshot.map(item=>({page:item.page,text:item.text,rect:item.rect,kind:(item.image?'attachment':'selection') as 'attachment'|'selection'})),
+   ...extracts.map(item=>({page:item.page,text:item.text,rect:item.rect,kind:'page' as const})),
+ ].filter(item=>!pageLimit||item.page<=pageLimit),sourceDocId);
+ operation.body={requestId:operation.requestId,question:q,context,sourcePage,omitPrimaryText:!!omitPrimary[key],omitPrimaryImage:!!omitImage[key],attachment:visual,...(roundSources.length?{sources:roundSources}:{}),...(!freeQuestion&&{maxCredits:answerLimit}),...(personal?{source:'personal',revision:personal.revision,model:personalModel}:settings)};
  }
+ roundSources=Array.isArray(operation.body.sources)?operation.body.sources as MessageSource[]:[];
  context=operation.body.context as string;sourcePage=operation.body.sourcePage as number;visual=operation.body.attachment as string|undefined;
  if(key.startsWith('draft-')&&!operation.threadId){
    if(!operation.creation){
@@ -642,7 +804,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
    operation.optimistic=true;
    setThreads(v=>updateThread(v,id,t=>({...t,messages:[...t.messages,{role:'user',content:q,createdAt:Date.now(),page:sourcePage}]})));
  }
- let reply:{answer:string;refs:string[];creditsCharged?:number;processing?:TutorProcessing;memorySources?:MemorySourceRef[]};
+ let reply:{answer:string;refs:string[];creditsCharged?:number;processing?:TutorProcessing;memorySources?:MemorySourceRef[];sources?:MessageSource[]};
  if(gateway){
    if(!operation.localBody){
    const {learningContext,catalog}=await request<{learningContext:Parameters<typeof localAnswer>[5];catalog:TopicCard[]}>('/threads/'+id+'/project-memory',json({question:q,context,omitPrimaryText:!!omitPrimary[key]}));
@@ -655,7 +817,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
      }catch { /* Fall back to existing project context if retrieval is unavailable. */ }
    }
    const answer=await localAnswer(gateway,q,excerpt,visual,operation.history??snapshot.messages,matches?[]:learningContext,matches?memoryPromptData(matches):undefined);
-   operation.localBody={requestId:operation.requestId,question:q,answer,previous:(operation.history??snapshot.messages).length,sourcePage,excerpt,memoryKeys:matches?.map(card=>card.key)};
+   operation.localBody={requestId:operation.requestId,question:q,answer,previous:(operation.history??snapshot.messages).length,sourcePage,excerpt,memoryKeys:matches?.map(card=>card.key),...(roundSources.length?{sources:roundSources}:{})};
    }
    reply=await request('/threads/'+id+'/local-answer',json(operation.localBody));
  }else{
@@ -667,8 +829,10 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  attempts.current.delete(key);attempts.current.delete(id);
  setFailedAsks(v=>{const next={...v};delete next[key];delete next[id];return next;});
  setQuestions(v=>({...v,[key]:v[key]?.trim()===q?'':v[key]||'',[id]:v[id]?.trim()===q?'':v[id]||''}));
+ writeDraftBook(book=>removeDraft(removeDraft(book,key),id));
+ setPracticeDrafts(values=>{if(!values[id])return values;const next={...values};delete next[id];return next;});
  setReceipts(v=>({...v,[id]:typeof reply.creditsCharged==='number'?`回答已保存 · 本次扣 ${creditNumber.format(reply.creditsCharged)} 积分`:freeQuestion?'回答已保存 · 0.000 站内积分':'回答已保存 · 查看账户积分明细'}));
- setExtras(v=>({...v,[key]:[],[id]:[]}));setThreads(v=>updateThread(v,id,t=>({...t,messages:[...t.messages,{role:'assistant',content:reply.answer,processing:reply.processing,memorySources:reply.memorySources}],refs:reply.refs})));
+ setExtras(v=>({...v,[key]:[],[id]:[]}));setThreads(v=>updateThread(v,id,t=>({...t,messages:[...t.messages,{role:'assistant',content:reply.answer,processing:reply.processing,memorySources:reply.memorySources,...(reply.sources?.length?{sources:reply.sources}:{})}],refs:reply.refs})));
  refreshMemory(value=>value+1);
  if(freeQuestion&&personalAutomaticRef.current)void indexProject(doc.course,id);
  }catch(e){
@@ -702,22 +866,42 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
    if(discussion)openThread(discussion,source.page);
    else setError('这条对话已移除，请重新打开项目记忆。');
  }
+ function openPracticeDraft(item:StudyDoc,threadId:string){
+   if(threadId.startsWith('draft-')){setError('先完成这条讨论的提问，再开始自测。');return;}
+   const discussion=threads.find(thread=>thread.id===threadId&&thread.docId===item.id);
+   if(!discussion||!discussion.messages.some(message=>message.role==='assistant')){
+     setError('这条讨论还没有可自测的回答。');return;
+   }
+   const topic=discussionTopic(discussion);
+   const question=discussion.messages.findLast(message=>message.role==='user')?.content.trim();
+   captureReadingPosition();
+   const draft='draft-'+crypto.randomUUID();
+   setDocId(item.id);requestReaderPage(discussion.page);
+   setThreads(values=>[...values,{id:draft,docId:item.id,page:discussion.page,messages:[]}]);
+   setActive(draft);setTab('discussions');setMobilePanel(true);navigate(true);
+   setPracticeDrafts(values=>({...values,[draft]:true}));
+   setQuestions(values=>({...values,[draft]:practicePrompt(topic,question)}));
+ }
  function startMemoryReview(card:TopicCard){
    const source=card.evidence.find(item=>item.kind==='gap')??card.evidence[0];
    const discussion=threads.find(item=>item.id===source.threadId);
    if(!discussion){setError('这条对话已移除，请重新打开项目记忆。');return;}
+   captureReadingPosition();
    const draft='draft-'+crypto.randomUUID();
    setDocId(discussion.docId);requestReaderPage(source.page);setActive(draft);setTab('discussions');setMobilePanel(true);
+   setPracticeDrafts(values=>({...values,[draft]:true}));
    setQuestions(values=>({...values,[draft]:`请围绕「${card.topic}」给我一道自测题，重点检查「${source.detail}」。等我作答后再给提示和解析。`}));
  }
  const allDocs=docs.length?docs:[sample];
  const notebookProjects=[...new Set([...docs.map(item=>item.course),...savedProjects])];
  const reading=!home&&!notebookOpen;
- const conversationNotes=noteSummaries.filter(note=>note.sources.some(source=>source.threadId===thread.id));
+ const conversationNotes=notes.filter(note=>note.sources.some(source=>source.threadId===thread.id));
+ const docDrafts=draftsForDoc(draftBook,doc.id).filter(draft=>draft.threadId!==active);
+ const activeDraft=draftForThread(draftBook,active);
  function closeShelf(){setLibrary(false);shelfTrigger.current?.focus();}
  function closeDiscussion(){setMobilePanel(false);discussionTrigger.current?.focus();}
  return <main className="workspace" onClickCapture={followNotebookSource}>
- {canReturnToReading&&<button type="button" className="reader-return" onClick={returnToReading}>返回刚才的位置</button>}
+ {canReturnToReading&&<button type="button" className="reader-return reader-return-floating" onClick={returnToReading}>返回刚才的位置</button>}
  <header className={`masthead ${home?'is-home':''}`}>{reading&&<button ref={shelfTrigger} className="icon-button" aria-label="切换资料库" aria-controls="study-library" aria-expanded={shelfOverlay?library:!collapsed} onClick={()=>{if(shelfOverlay)setLibrary(!library);else collapse(!collapsed);}}><Icon name="menu"/></button>}<a className="brand" href="#home" aria-label="页边首页"><span className="brand-mark"><Icon name="book" size={24}/></span><span>页边<span className="brand-en">MARGIN</span></span></a>{!home&&<a className="hub-link" href="#home" title="学习首页"><LibraryBig size={16}/><span>学习首页</span></a>}<button type="button" className="notebook-nav" title="笔记本" aria-label="打开笔记本" aria-current={notebookOpen?'page':undefined} onClick={()=>openNotebook()}><NotebookPen size={17}/><span>笔记本</span></button><PersonalApi active={personal} connection={connection} gatewayActive={gatewayActive}
  onGateway={value=>{setConnection(value);setGatewayActive(!!value);if(value)setPersonal(null)}}
  onChange={profile=>{setGatewayActive(false);setPersonal(profile)}}/>{reading&&<button className="import-button" onClick={()=>openImport(doc.course)}><span>导入讲义</span></button>}<button className="account-trigger" type="button" title="我的账户与学习积分" aria-label="我的账户与学习积分" onClick={()=>setAccount(true)}><CircleUserRound size={19}/><span>我的账户</span></button></header>
@@ -732,7 +916,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
    setSavedProjects(values=>[...new Set([...values.filter(name=>name!==project),...(target?[target]:[])])]);
    setMemoryProject(current=>current===project?(target??null):current);
    refreshMemory(value=>value+1);
- }} onOpenMemory={openProjectMemory} onOpenNotebook={project=>openNotebook(project)} onMoveDoc={chooseMove} onPinDoc={item=>void organize(item,{pinned:!item.pinned})} onRemoveDoc={item=>setRemove({kind:'doc',id:item.id,name:item.name})} threads={threads} onOpenDoc={openDocument} onImport={openImport} onSample={()=>openDocument(sample)}/>:<section className="hub-loading" role="status">{libraryError||'正在读取资料库…'}{libraryError&&<button onClick={()=>reloadLibrary(n=>n+1)}>重试</button>}{libraryError.includes('登录')&&<a href="/login">登录</a>}</section>}</div>
+ }} onOpenMemory={openProjectMemory} onOpenNotebook={project=>openNotebook(project)} onMoveDoc={chooseMove} onPinDoc={item=>void organize(item,{pinned:!item.pinned})} onRemoveDoc={item=>setRemove({kind:'doc',id:item.id,name:item.name})} threads={threads} notes={notes} onOpenNote={id=>openNotebook(undefined,undefined,id)} onPractice={openPracticeDraft} loadMemory={loadProjectMemory} onOpenDoc={openDocument} onImport={openImport} onSample={()=>openDocument(sample)}/>:<section className="hub-loading" role="status">{libraryError||'正在读取资料库…'}{libraryError&&<button onClick={()=>reloadLibrary(n=>n+1)}>重试</button>}{libraryError.includes('登录')&&<a href="/login">登录</a>}</section>}</div>
  <Notebook visible={notebookOpen||reading&&tab==='note'} full={notebookOpen} panelHost={notePanelHost}
    docs={docs} threads={threads} projects={notebookProjects} currentSource={doc.id==='sample'?undefined:currentNoteSource(doc,thread)}
    view={noteView} inserts={inserts} onInsertResult={onNoteInsertResult} onNotesChange={onNotesChange}
@@ -740,8 +924,8 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  <div className="desk" hidden={home||notebookOpen} data-folded={collapsed}>
  {library&&shelfOverlay&&<button type="button" className="reader-shelf-backdrop" tabIndex={-1} aria-label="关闭资料库" onClick={closeShelf}/>}
  <aside id="study-library" className={`library ${library?'is-open':''}`} aria-label="资料库" onKeyDown={event=>{if(event.key==='Escape'&&library){event.stopPropagation();closeShelf();}}}><div className="library-heading"><span>我的资料库</span><button className="icon-button mobile-only" aria-label="关闭资料库" onClick={closeShelf}><Icon name="close"/></button></div><Shelf docs={allDocs} current={doc.id} organize={organize} move={chooseMove} drop={dropped} remove={d=>setRemove({kind:'doc',id:d.id,name:d.name})} open={openDocument}/><button className="add-document" onClick={()=>openImport(doc.course)}><Icon name="plus" size={16}/>添加课程资料</button></aside>
- <DeskDivider side="left"/><section className="reader-column" aria-label="讲义阅读区"><div className="document-heading"><div><h1>{doc.name.replace(/\.(pdf|pptx)$/i,'')}</h1><span className="document-course" title={doc.course}>{doc.course}</span></div><span className="file-type">{doc.kind.toUpperCase()}</span></div><div className="reader-hint">{(croppedImageCount>0||cropPending)&&<button className="reader-draft-entry" type="button" aria-label={`问题草稿，${croppedImageCount} 张截图`} onClick={()=>{setTab('discussions');setLibrary(false);setMobilePanel(true);}}>问题草稿 · {croppedImageCount} 张截图{cropPending?' · 正在处理':''}</button>}<button ref={discussionTrigger} className="mobile-only text-button" aria-controls="discussion-panel" aria-expanded={mobilePanel} onClick={()=>{setLibrary(false);setMobilePanel(true);requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('#discussion-panel .reader-return-button')?.focus());}}>页边讨论{items.length?` · ${items.length}`:''}</button></div><div className="reader-stage">{!home&&libraryLoaded&&<Reader lookup={lookup} key={doc.id} documentId={doc.id} navigation={{...readerRequest,temporary:canReturnToReading}} url={doc.id==='sample'?'/lesson.pdf':`/api/study/docs/${doc.id}/file`} kind={doc.kind} page={page} onPage={next=>{setPage(next);if(canReturnToReading)return;try{localStorage.setItem('pagewise:page:'+doc.id,String(next))}catch{}}} onSelect={select} onCrop={captureCrop} onCropStart={beginCrop} onCropState={updateCropPending} onDismiss={()=>{setThreads(v=>dismissSelection(v,active,currentPending,question));newQuestion();setMobilePanel(false);}} onReady={onReaderReady} focusPage={thread?.page} focusRect={thread?.docId===doc.id&&!omitImage[active]?thread.rect:undefined} annotations={items.filter(item=>item.messages.length>0).map(item=>({id:item.id,page:item.page,label:discussionTitle(item),rect:item.rect}))} onOpenAnnotation={(id,sourcePage)=>{const annotation=items.find(item=>item.id===id);if(annotation)openThread(annotation,sourcePage)}}/>}</div></section>
- <DeskDivider/><aside id="discussion-panel" data-empty-question={!thread.messages.length&&!primaryImage&&!primaryTextVisible&&!citations.length&&!currentPending&&!errors[active]} className={`margin-panel ${mobilePanel?'is-open':''}`} aria-label="页边讨论" onClickCapture={followNotebookSource} onKeyDown={event=>{if(event.key==='Escape'&&mobilePanel&&!event.defaultPrevented&&!(event.target instanceof Element&&event.target.closest('dialog[open]'))){event.stopPropagation();closeDiscussion();}}}><div className="margin-header"><div className="panel-tabs"><button className={tab==='discussions'?'active':''} onClick={()=>{setTab('discussions');requestAnimationFrame(()=>document.querySelector<HTMLElement>('#discussion-panel .conversation')?.focus({preventScroll:true}));}}>页边讨论<span>{items.length}</span></button><button className={tab==='memory'?'active':''} onClick={()=>{setMemoryProject(doc.course);setTab('memory')}}>项目记忆</button><button className={tab==='note'?'active':''} onClick={()=>openMarginNotes(undefined,false)}>笔记本</button></div><button className="reader-return-button mobile-only" onClick={closeDiscussion}>返回第 {page} 页</button></div>
+ <DeskDivider side="left"/><section className="reader-column" aria-label="讲义阅读区"><div className="document-heading"><div><h1>{doc.name.replace(/\.(pdf|pptx)$/i,'')}</h1><span className="document-course" title={doc.course}>{doc.course}</span></div><span className="file-type">{doc.kind.toUpperCase()}</span></div><div className="reader-hint">{canReturnToReading&&<button type="button" className="reader-return-inline" onClick={returnToReading}>返回刚才的位置</button>}{(croppedImageCount>0||cropPending)&&<button className="reader-draft-entry" type="button" aria-label={`问题草稿，${croppedImageCount} 张截图`} onClick={()=>{setTab('discussions');setLibrary(false);setMobilePanel(true);}}>问题草稿 · {croppedImageCount} 张截图{cropPending?' · 正在处理':''}</button>}<button ref={discussionTrigger} className="mobile-only text-button" aria-controls="discussion-panel" aria-expanded={mobilePanel} onClick={()=>{setLibrary(false);setMobilePanel(true);requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('#discussion-panel .reader-return-button')?.focus());}}>页边讨论{items.length?` · ${items.length}`:''}</button></div><div className="reader-stage">{!home&&libraryLoaded&&<Reader lookup={lookup} key={doc.id} documentId={doc.id} navigation={{...readerRequest,temporary:canReturnToReading}} url={doc.id==='sample'?'/lesson.pdf':`/api/study/docs/${doc.id}/file`} kind={doc.kind} page={page} onPage={next=>{setPage(next);if(canReturnToReading)return;try{localStorage.setItem('pagewise:page:'+doc.id,String(next))}catch{}}} onSelect={select} onCrop={captureCrop} onCropStart={beginCrop} onCropState={updateCropPending} onDismiss={()=>{setThreads(v=>dismissSelection(v,active,currentPending,question));newQuestion();setMobilePanel(false);}} onReady={onReaderReady} focusPage={thread?.page} focusRect={thread?.docId===doc.id&&!omitImage[active]?thread.rect:undefined} annotations={items.filter(item=>item.messages.length>0).map(item=>({id:item.id,page:item.page,label:discussionTitle(item),rect:item.rect}))} onOpenAnnotation={(id,sourcePage)=>{const annotation=items.find(item=>item.id===id);if(annotation)openThread(annotation,sourcePage)}}/>}</div></section>
+ <DeskDivider/><aside id="discussion-panel" data-empty-question={!thread.messages.length&&!primaryImage&&!primaryTextVisible&&!citations.length&&!currentPending&&!errors[active]} className={`margin-panel ${mobilePanel?'is-open':''}`} aria-label="页边讨论" onClickCapture={followNotebookSource} onKeyDown={event=>{if(event.key==='Escape'&&mobilePanel&&!event.defaultPrevented&&!(event.target instanceof Element&&event.target.closest('dialog[open]'))){event.stopPropagation();closeDiscussion();}}}><div className="margin-header"><div className="panel-tabs"><button className={tab==='discussions'?'active':''} onClick={()=>{setTab('discussions');requestAnimationFrame(()=>document.querySelector<HTMLElement>('#discussion-panel .conversation')?.focus({preventScroll:true}));}}>页边讨论<span>{items.length}</span></button><button className={tab==='memory'?'active':''} onClick={()=>{setMemoryProject(doc.course);setTab('memory')}}>项目记忆</button><button className={tab==='note'?'active':''} onClick={()=>openMarginNotes(undefined,false)}>笔记本</button></div>{canReturnToReading&&<button className="reader-return-button mobile-only" onClick={returnToReading}>回到原位置</button>}<button className="reader-return-button mobile-only" onClick={closeDiscussion}>返回第 {page} 页</button></div>
    <div className="note-panel-slot" ref={setNotePanelHost} hidden={tab!=='note'}/>{tab==='note'?null:tab==='memory'?<ProjectMemory key={openProject} course={openProject} courses={projects} changeCourse={setMemoryProject}
    automatic={automaticMemory} toggleAutomatic={toggleAutomaticMemory} canAnalyze={memoryReady}
    site={!freeQuestion} priceLabel={memoryPriceLabel} automaticPriceLabel={automaticPriceLabel}
@@ -756,26 +940,48 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
   {!items.some(t=>!threadSearch.trim()||(`${discussionTitle(t)} ${t.page} ${t.messages.map(message=>message.content).join(' ')}`).toLocaleLowerCase().includes(threadSearch.trim().toLocaleLowerCase()))&&<p className="thread-search-empty">没有匹配的讨论</p>}
  </div>
  </details><button className="icon-button" aria-label="删除当前讨论" disabled={!existing||currentPending} onClick={()=>thread&&setRemove({kind:'thread',id:thread.id,name:selectionLabel(thread)})}><Icon name="trash" size={15}/></button></div>}
- <div className="conversation-notes" aria-label="当前对话的笔记">
-   <div className="conversation-notes-heading"><span><NotebookPen size={14}/>对话笔记{conversationNotes.length?` · ${conversationNotes.length}`:''}</span>
-     <button type="button" disabled={creatingConversationNote||currentPending||cropPending} onClick={()=>{void createConversationNote();}}>{creatingConversationNote?'创建中…':'新建笔记'}</button>
-     <button type="button" disabled={thread.id.startsWith('draft-')} title={thread.id.startsWith('draft-')?'先提问或新建笔记以保存对话':'选择跨项目的笔记，关联当前对话'} onClick={()=>openNotebook()}>关联已有笔记</button>
+ <details className="conversation-notes" aria-label="当前对话的笔记">
+   <summary><NotebookPen size={14}/><span>对话笔记{conversationNotes.length?` · ${conversationNotes.length}`:''}</span><Icon name="chevron" size={12}/></summary>
+   <div className="conversation-notes-body">
+     <div className="conversation-notes-heading">
+       <button type="button" disabled={creatingConversationNote||currentPending||cropPending} onClick={()=>{void createConversationNote();}}>{creatingConversationNote?'创建中…':'新建笔记'}</button>
+       <button type="button" disabled={thread.id.startsWith('draft-')} title={thread.id.startsWith('draft-')?'先提问或新建笔记以保存对话':'选择跨项目的笔记，关联当前对话'} onClick={()=>openNotebook()}>关联已有笔记</button>
+     </div>
+     {conversationNotes.length>0&&<div className="conversation-note-links">{conversationNotes.slice(0,3).map(note=><button type="button" key={note.id} onClick={()=>openMarginNotes(note.id)}><span>{noteNumber(note.number)} {note.title}</span></button>)}{conversationNotes.length>3&&<button type="button" onClick={()=>openMarginNotes()}>查看全部 {conversationNotes.length} 条</button>}</div>}
    </div>
-   {conversationNotes.length>0&&<div className="conversation-note-links">{conversationNotes.slice(0,3).map(note=><button type="button" key={note.id} onClick={()=>openMarginNotes(note.id)}><span>{noteNumber(note.number)} {note.title}</span></button>)}{conversationNotes.length>3&&<button type="button" onClick={()=>openMarginNotes()}>查看全部 {conversationNotes.length} 条</button>}</div>}
- </div>
- <div className="conversation" role="region" aria-label="讨论正文" tabIndex={0} onScroll={event=>{const view=event.currentTarget;followDiscussion.current=view.scrollHeight-view.clientHeight-view.scrollTop<=28;if(followDiscussion.current)setUnseenReply(false);}}>{primaryImage&&<div className="selected-passage"><div><span>第 {thread.page} 页 · 图像选区</span><button className="text-button" onClick={()=>locateSource(doc,thread.page)}>定位原文<Icon name="chevron" size={12}/></button><button type="button" className="image-remove" disabled={currentPending} onClick={removePrimaryImage} aria-label="移除首次框选的图片" title="移除图片">×</button></div><img src={primaryImage} alt={`第 ${thread.page} 页框选内容`}/></div>}{!errors[active]&&thread.messages.length===0&&(primaryImage||citations.length>0||(primaryTextVisible))&&<div className="start-discussion"><p>这段内容，你想弄懂什么？</p>{newAnswerPrice&&<p className="quick-question-price">{newAnswerPrice}</p>}<div className="quick-actions"><button aria-describedby="question-price" disabled={currentPending||!ready||creditBlocked} onClick={()=>ask('请结合讲义上下文，解释这个选区的内容，并给出直观例子。')}>解释一下</button><button aria-describedby="question-price" disabled={currentPending||!ready||creditBlocked} onClick={()=>ask('请把选区内容翻译成中文；如果原文已经是中文，请翻译成英文。保留公式与术语。')}>翻译选区</button></div></div>}{thread.messages.map((m,i)=><div className={`message ${m.role==='user'?'user-message':'assistant-message'}`} key={i}><span className="message-label">{m.role==='user'?['我的问题',questionTime(m.createdAt)].filter(Boolean).join(' · '):'页边'}</span>{m.role==='assistant'?<><div onMouseUp={e=>{const sel=window.getSelection();if(sel?.rangeCount&&e.currentTarget.contains(sel.getRangeAt(0).commonAncestorContainer)&&sel.toString().trim()){setQuote(sel.toString().trim().slice(0,5000));}}}><MarkdownAnswer content={m.content}/></div>{thread.messages[i-1]?.page&&<button type="button" className="answer-source" onClick={()=>locateSource(doc,thread.messages[i-1].page!)}>查看第 {thread.messages[i-1].page} 页原文</button>}<button type="button" className="save-answer" onClick={()=>{
+ </details>
+ {(docDrafts.length>0||activeDraft?.imageLost)&&<div className="unsent-drafts" aria-label="未发送草稿">
+   <span className="unsent-drafts-label" title="草稿只保存在本机此账户，换设备或换账户不会出现">未发送草稿</span>
+   {docDrafts.slice(0,4).map(draft=><button type="button" key={draft.threadId} title={draft.text||draft.selection?.text} onClick={()=>openDraft(draft)}>{draft.text.trim().slice(0,28)||draft.selection?.text?.slice(0,28)||`第 ${draft.selection?.page??1} 页选区`}{draft.imageLost?' · 图片需重新框选':''}</button>)}
+   {activeDraft?.imageLost&&<p className="citation-notice" role="status">草稿中的截图未保存在本机，请重新框选后再发送。</p>}
+ </div>}
+ {practiceDrafts[active]&&<div className="practice-draft" role="status">
+   <div><strong>自测草稿</strong><span>先作答，再讲解 · 发送前显示本次报价，不会自动发送</span></div>
+   <button type="button" onClick={()=>{if(canReturnToReading)returnToReading();else navigate(false);}}>回到复习材料</button>
+ </div>}
+ {!thread.messages.length&&!primaryImage&&!citations.length&&!primaryTextVisible&&!currentPending&&!errors[active]&&<div className="discussion-empty" role="status">
+   <p>在讲义上选中文字，或框选图像，然后提问。</p>
+   <p>也可以直接输入问题；发送前会显示本次报价。</p>
+   <button type="button" onClick={()=>document.querySelector<HTMLTextAreaElement>('#question')?.focus()}>直接输入问题</button>
+ </div>}
+ <div className="conversation" role="region" aria-label="讨论正文" tabIndex={0} onScroll={event=>{const view=event.currentTarget;followDiscussion.current=view.scrollHeight-view.clientHeight-view.scrollTop<=28;if(followDiscussion.current)setUnseenReply(false);}}>{primaryImage&&<div className="selected-passage"><div><span>第 {thread.page} 页 · 图像选区</span><button className="text-button" onClick={()=>locateSource(doc,thread.page)}>定位原文<Icon name="chevron" size={12}/></button><button type="button" className="image-remove" disabled={currentPending} onClick={removePrimaryImage} aria-label="移除首次框选的图片" title="移除图片">×</button></div><img src={primaryImage} alt={`第 ${thread.page} 页框选内容`}/></div>}{!errors[active]&&thread.messages.length===0&&(primaryImage||citations.length>0||(primaryTextVisible))&&<div className="start-discussion"><p>这段内容，你想弄懂什么？</p>{newAnswerPrice&&<p className="quick-question-price">{newAnswerPrice}</p>}<div className="quick-actions"><button aria-describedby="question-price" disabled={currentPending||!ready||creditBlocked} onClick={()=>ask('请结合讲义上下文，解释这个选区的内容，并给出直观例子。')}>解释一下</button><button aria-describedby="question-price" disabled={currentPending||!ready||creditBlocked} onClick={()=>ask('请把选区内容翻译成中文；如果原文已经是中文，请翻译成英文。保留公式与术语。')}>翻译选区</button></div></div>}{thread.messages.map((m,i)=><div className={`message ${m.role==='user'?'user-message':'assistant-message'}`} key={i}><span className="message-label">{m.role==='user'?['我的问题',questionTime(m.createdAt)].filter(Boolean).join(' · '):'页边'}</span>{m.role==='assistant'?<><div onMouseUp={e=>{const sel=window.getSelection();if(sel?.rangeCount&&e.currentTarget.contains(sel.getRangeAt(0).commonAncestorContainer)&&sel.toString().trim()){setQuote(sel.toString().trim().slice(0,5000));}}}><MarkdownAnswer content={m.content}/></div><AnswerSources sources={messageSources(m,doc.id,thread.messages[i-1]?.page)} legacy={!m.sources?.length} onLocate={sourcePage=>locateSource(doc,sourcePage)}/><button type="button" className="save-answer" onClick={()=>{
  const prompt=thread.messages.slice(0,i).findLast(item=>item.role==='user');
- appendNote(['## '+noteHeading+(prompt?.page?' · 第 '+prompt.page+' 页':''),noteSource(prompt?.page),
-   ...(prompt?['### 问题',prompt.content]:[]),'### 回答',m.content]);
- }}><NotebookPen size={14}/>存入笔记</button>{!!m.memorySources?.length&&<div className="references"><span>参考的学习主题</span>{m.memorySources.map(source=><button type="button" key={source.topic} onClick={()=>openMemorySource(source)}>{source.topic} · 第 {source.page} 页</button>)}</div>}{m.processing&&<small className="processing-receipt" title={processingDetails(m.processing)}>{processingLabel(m.processing)}</small>}</>:<div>{m.content}</div>}</div>)}{currentPending&&<div className="thinking" role="status"><span/><span/><span/>正在沿着你的问题思考</div>}{receipts[active]&&<p className="question-receipt" role="status">{receipts[active]}</p>}{errors[active]&&<div className="thread-error" role="alert">{errors[active]} {failedAsk&&replayLabel}<button type="button" className="text-button" disabled={currentPending||!ready||(creditBlocked&&!failedAsk?.sent)} onClick={()=>void ask(attempts.current.get(active)?.question||question)}>重试原问题</button><button className="text-button" onClick={()=>setQuestion(thread.messages.filter(m=>m.role==='user').at(-1)?.content||'请解释选区内容。')}>重新编辑问题</button></div>}{!!thread.refs?.length&&<div className="references"><span>参考了你的课程记忆</span>{thread.refs.map(id=>{const ref=threads.find(t=>t.id===id);return ref?<button key={id} onClick={()=>openThread(ref)}><Icon name="chat" size={13}/>第 {ref.page} 页 · {selectionLabel(ref).slice(0,24)}<Icon name="chevron" size={12}/></button>:<span key={id}>历史讨论 {id.slice(0,8)}</span>;})}</div>}<div ref={bottom}/></div>{unseenReply&&<button type="button" className="new-reply" onClick={()=>{followDiscussion.current=true;setUnseenReply(false);bottom.current?.scrollIntoView({block:'nearest'});}}>查看新回复</button>}<div className="citation-tools">{quote&&<button type="button" className="citation-followup" disabled={currentPending||citations.length>=12} title="将所选回答作为下一问的上下文" onClick={addAnswerQuote}>引用到追问</button>}{(excerpts.length>0||hasAnswer)&&<div className="note-save-actions" role="group" aria-label="存入笔记">{excerpts.length>0&&<button type="button" onClick={saveExcerpts} title="保存所选讲义文字和原文页码">保存讲义摘录</button>}{hasAnswer&&<button type="button" onClick={saveDiscussion} title="保存当前讨论的所有问题与回答">保存整段对话</button>}</div>}<label className="attach-file" title="支持 PNG、JPEG、WebP 图片，也可粘贴到提问框">添加文件<input type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={event=>{
+ beginNoteSave({kind:'answer',title:noteHeading+(prompt?.page?' · 第 '+prompt.page+' 页':''),
+   text:[...(prompt?['### 问题\n\n'+prompt.content]:[]),'### 回答\n\n'+m.content,
+     ...roundSourceLines(m,doc.id,prompt?.page,noteSource)].join('\n\n'),
+   sources:[currentNoteSource(doc,thread),...messageSources(m,doc.id,prompt?.page).map(source=>({project:doc.course,docId:doc.id,...(!thread.id.startsWith('draft-')?{threadId:thread.id}:{}),page:source.page}))]});
+ }}><NotebookPen size={14}/>存入笔记</button>{!!m.memorySources?.length&&<div className="references"><span>参考的学习主题</span>{m.memorySources.map(source=><button type="button" key={source.topic} onClick={()=>openMemorySource(source)}>{source.topic} · 第 {source.page} 页</button>)}</div>}{m.processing&&<details className="processing-receipt"><summary title={processingDetails(m.processing)}>{processingLabel(m.processing).split(' · ')[0]} · 模型与用量</summary><small>{processingDetails(m.processing)}</small></details>}</>:<div>{m.content}</div>}</div>)}{currentPending&&<div className="thinking" role="status"><span/><span/><span/>正在沿着你的问题思考</div>}{receipts[active]&&<p className="question-receipt" role="status">{receipts[active]}</p>}{errors[active]&&<div className="thread-error" role="alert">{errors[active]} {failedAsk&&replayLabel}<button type="button" className="text-button" disabled={currentPending||!ready||(creditBlocked&&!failedAsk?.sent)} onClick={()=>void ask(attempts.current.get(active)?.question||question)}>重试原问题</button><button className="text-button" onClick={()=>setQuestion(thread.messages.filter(m=>m.role==='user').at(-1)?.content||'请解释选区内容。')}>重新编辑问题</button></div>}{!!thread.refs?.length&&<div className="references"><span>参考了你的课程记忆</span>{thread.refs.map(id=>{const ref=threads.find(t=>t.id===id);return ref?<button key={id} onClick={()=>openThread(ref)}><Icon name="chat" size={13}/>第 {ref.page} 页 · {selectionLabel(ref).slice(0,24)}<Icon name="chevron" size={12}/></button>:<span key={id}>历史讨论 {id.slice(0,8)}</span>;})}</div>}<div ref={bottom}/></div>{unseenReply&&<button type="button" className="new-reply" onClick={()=>{followDiscussion.current=true;setUnseenReply(false);bottom.current?.scrollIntoView({block:'nearest'});}}>查看新回复</button>}<div className="citation-tools">{quote&&<button type="button" className="citation-followup" disabled={currentPending||citations.length>=MAX_MESSAGE_SOURCES} title="将所选回答作为下一问的上下文" onClick={addAnswerQuote}>引用到追问</button>}{(excerpts.length>0||hasAnswer)&&<div className="note-save-actions" role="group" aria-label="存入笔记">{excerpts.length>0&&<button type="button" onClick={saveExcerpts} title="保存所选讲义文字和原文页码">保存讲义摘录</button>}{hasAnswer&&<button type="button" onClick={saveDiscussion} title="保存当前讨论的所有问题与回答">保存整段对话</button>}</div>}<label className="attach-file" title="支持 PNG、JPEG、WebP 图片，也可粘贴到提问框">添加文件<input type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={event=>{
    const files=Array.from(event.currentTarget.files??[]);
    event.currentTarget.value='';
    void addImageAttachments(files);
- }}/></label>{((thread.text&&!omitPrimary[active]&&thread.text!=='按页提问')||primaryImage||citations.length>0)&&<div className="citation-list" aria-label="本次引用">
-  {(primaryImage||citations.some(item=>!!item.image))&&<div className="screenshot-attachments" aria-label="截图附件">{primaryImage&&<figure><button type="button" className="screenshot-preview" onClick={()=>setPreviewImage({src:primaryImage,page:thread.page})} aria-label={`预览第 ${thread.page} 页截图`}><img src={primaryImage} alt="" /><figcaption>第 {thread.page} 页</figcaption></button><button type="button" className="screenshot-remove" disabled={currentPending} onClick={removePrimaryImage} aria-label={`删除第 ${thread.page} 页截图`}>×</button></figure>}{citations.map(item=>item.image?<figure key={item.attachmentId}><button type="button" className="screenshot-preview" onClick={()=>setPreviewImage({src:item.image!,page:item.page})} aria-label={`预览第 ${item.page} 页截图`}><img src={item.image} alt="" /><figcaption>第 {item.page} 页</figcaption></button><button type="button" className="screenshot-remove" disabled={currentPending} onClick={()=>setExtras(v=>({...v,[active]:(v[active]||[]).filter(citation=>citation.attachmentId!==item.attachmentId)}))} aria-label={`删除第 ${item.page} 页截图`}>×</button></figure>:null)}</div>}
+ }}/></label>{((thread.text&&!omitPrimary[active]&&thread.text!=='按页提问')||primaryImage||citations.length>0||!!citationNotice)&&<div className="citation-list" aria-label="本次引用">
+  {primaryImage&&<div className="screenshot-attachments" aria-label="截图附件"><figure><button type="button" className="screenshot-preview" onClick={()=>setPreviewImage({src:primaryImage,page:thread.page})} aria-label={`预览第 ${thread.page} 页截图`}><img src={primaryImage} alt="" /><figcaption>第 {thread.page} 页</figcaption></button><button type="button" className="screenshot-remove" disabled={currentPending} onClick={removePrimaryImage} aria-label={`删除第 ${thread.page} 页截图`}>×</button></figure></div>}
   {thread.text&&!omitPrimary[active]&&thread.text!=='按页提问'&&<div className="citation-chip" title={thread.text}><button type="button" className="citation-locate" aria-label={`定位第 ${thread.page} 页：${thread.text}`} onClick={()=>locateSource(doc,thread.page)}><small>P{thread.page}</small><span>{thread.text}</span></button><button type="button" className="citation-remove" disabled={currentPending} aria-label={`移除引用：${thread.text}`} onClick={()=>setOmitPrimary(v=>({...v,[active]:true}))}>×</button></div>}
 
- {citations.map((c,i)=><div className="citation-chip" key={i} title={c.text||'图片'}><small>P{c.page}</small><span>{c.text||'图片'}</span><button type="button" className="citation-remove" disabled={currentPending} aria-label={`移除引用：${c.text||'图片'}`} onClick={()=>setExtras(v=>({...v,[active]:(v[active]||[]).filter((_,j)=>i!==j)}))}>×</button></div>)}</div>}</div>{latestInsert&&<div className="notebook-action-feedback"><span role="status">{latestNoteResult?.status==='saved'?'笔记已保存':latestNoteResult?.status==='error'?`笔记未保存：${latestNoteResult.error}`:'正在保存笔记…'}</span><button type="button" onClick={()=>openMarginNotes(latestNoteResult?.status==='saved'?latestNoteResult.noteId:undefined,false)}>{latestNoteResult?.status==='error'?'打开笔记本重试':'查看笔记'}</button></div>}<form className="composer" onSubmit={e=>{e.preventDefault();void ask();}}><div className="question-price" id="question-price" role="status">{priceLabel&&<span>{priceLabel}</span>}{!freeQuestion&&automaticMemory&&pricing&&<span>{automaticPriceLabel}</span>}<button type="button" className="question-account-link" onClick={()=>setAccount(true)}>积分账户</button>{!freeQuestion&&!!credits.error&&<button type="button" disabled={credits.loading} onClick={()=>void credits.refresh()}>重新读取</button>}{insufficientCredits&&<><strong>新提问的可用积分不足。保存学习笔记可获得积分，或改用 Magpie / 个人 API，站内扣分为 0.000。</strong><button type="button" onClick={()=>openMarginNotes(undefined,false)}>写笔记赚积分</button><button type="button" onClick={()=>document.querySelector<HTMLButtonElement>('.source-trigger')?.click()}>切换模型来源</button></>}{!freeQuestion&&credits.error?.includes('登录')&&<a href="/login">登录</a>}</div><label className="sr-only" htmlFor="question">向课件提问</label><textarea id="question" aria-describedby="question-price" onPaste={event=>{
+ <CitationChips items={citations} disabled={currentPending} notice={citationNotice}
+   onLocate={item=>locateSource(doc,item.page)}
+   onRemove={attachmentId=>setExtras(v=>({...v,[active]:(v[active]||[]).filter(citation=>citation.attachmentId!==attachmentId)}))}
+   onPreview={item=>setPreviewImage({src:item.image!,page:item.page})}/></div>}</div>{latestInsert&&<div className="notebook-action-feedback"><span role="status">{latestNoteResult?.status==='saved'?'笔记已保存':latestNoteResult?.status==='error'?`笔记未保存：${latestNoteResult.error}`:'正在保存笔记…'}</span><button type="button" onClick={()=>openMarginNotes(latestNoteResult?.status==='saved'?latestNoteResult.noteId:undefined,false)}>{latestNoteResult?.status==='error'?'打开笔记本重试':'查看笔记'}</button></div>}<form className="composer" onSubmit={e=>{e.preventDefault();void ask();}}><div className="question-price" id="question-price" role="status">{priceLabel&&<span>{priceLabel}</span>}{!freeQuestion&&automaticMemory&&pricing&&<span>{automaticPriceLabel}</span>}<button type="button" className="question-account-link" onClick={()=>setAccount(true)}>积分账户</button>{!freeQuestion&&!!credits.error&&<button type="button" disabled={credits.loading} onClick={()=>void credits.refresh()}>重新读取</button>}{insufficientCredits&&<><strong>新提问的可用积分不足。保存学习笔记可获得积分，或改用 Magpie / 个人 API，站内扣分为 0.000。</strong><button type="button" onClick={()=>openMarginNotes(undefined,false)}>写笔记赚积分</button><button type="button" onClick={()=>document.querySelector<HTMLButtonElement>('.source-trigger')?.click()}>切换模型来源</button></>}{!freeQuestion&&credits.error?.includes('登录')&&<a href="/login">登录</a>}</div><label className="sr-only" htmlFor="question">向课件提问</label><textarea id="question" aria-describedby="question-price" onPaste={event=>{
    const clipboard=event.clipboardData;
    const files=Array.from(clipboard.files).filter(file=>file.type.startsWith('image/'));
    const images=files.length?files:Array.from(clipboard.items)
@@ -813,6 +1019,7 @@ export default function Workspace({showAdmin=false,accountSource='chatgpt'}:{sho
  </dialog>
  {error&&!upload&&<div className="global-error" role="alert">{error}{error.includes('登录')&&<a href="/login">登录</a>}<button className="icon-button" aria-label="关闭提示" onClick={()=>setError('')}><Icon name="close" size={15}/></button></div>}
  {upload&&<div className="modal-backdrop"><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="upload-title"><button className="dialog-close icon-button" aria-label="关闭导入" disabled={uploading} onClick={()=>setUpload(false)}><Icon name="close"/></button><span className="dialog-kicker">我的资料库</span><h2 id="upload-title">把讲义放到页边</h2><p>PDF 或 PowerPoint，按课程收好。</p><form onSubmit={uploadFile}><label htmlFor="course">归入项目</label><input list="import-projects" id="course" autoFocus maxLength={100} required value={course} onChange={e=>setCourse(e.target.value)} placeholder="选择已有项目或输入新项目名"/><datalist id="import-projects">{[...new Set([...docs.map(d=>d.course),...savedProjects])].map(name=><option key={name} value={name}/>)}</datalist><label className="file-drop" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();if(e.dataTransfer.files[0])dropped(e.dataTransfer.files[0])}} htmlFor="file-upload"><Icon name="upload" size={26}/><strong>{file?file.name:'选择一份讲义'}</strong><span>支持 .pdf、.pptx · 最多 20 MiB</span><input id="file-upload" type="file" accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" onChange={e=>{const f=e.target.files?.[0]||null;if(f&&f.size>20*1024*1024){setError('文件超过 20 MiB，请选择较小的文件。');setFile(null);}else{setError('');setFile(f);}}}/></label>{error&&<p className="form-error" role="alert">{error}{error.includes('登录')&&<a href="/login"> 登录</a>}</p>}<button className="primary-button" disabled={!file||!course.trim()||uploading}>{uploading?'正在导入…':'导入并开始阅读'}</button><small className="upload-privacy"><Icon name="lock" size={12}/>资料与讨论保存在你的账户下</small></form></section></div>}
+ <NoteSaveDialog intent={saveIntent} notes={notes} busy={saveBusy} receipt={saveReceipt} onConfirm={choice=>void confirmNoteSave(choice)} onClose={closeNoteSave}/>
  <dialog ref={previewDialog} className="screenshot-preview-dialog" aria-label="截图预览" onClose={()=>setPreviewImage(null)}><header><span>第 {previewImage?.page} 页截图</span><button type="button" className="icon-button" aria-label="关闭截图预览" onClick={()=>setPreviewImage(null)}>×</button></header>{previewImage&&<img src={previewImage.src} alt={`第 ${previewImage.page} 页截图`} />}</dialog>
  {remove&&<div className="modal-backdrop"><section className="dialog delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><h2 id="delete-title">删除这{remove.kind==='doc'?'份讲义':'条讨论'}？</h2><p className="delete-name">{remove.name}</p><p>{remove.kind==='doc'?'这份讲义及其全部讨论和课程记忆将被删除。':'这条讨论及其课程记忆将被删除。'}此操作无法撤销。</p><div className="dialog-actions"><button disabled={deleting} onClick={()=>setRemove(null)}>保留</button><button className="danger-button" disabled={deleting} onClick={()=>void confirmDelete()}>{deleting?'正在删除…':'确认删除'}</button></div></section></div>}
  </main>;

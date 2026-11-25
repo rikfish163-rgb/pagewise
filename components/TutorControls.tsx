@@ -65,6 +65,15 @@ export function useTutorSettings(){
 }
 
 export function TutorControls({value,onChange,availability}:{value:TutorSettings;onChange:(s:TutorSettings)=>void;availability:TutorAvailability}){
+  const options=useRef<HTMLDetailsElement>(null);
+  useEffect(()=>{
+    function closeOutside(event:PointerEvent){
+      const details=options.current;
+      if(details?.open&&!event.composedPath().includes(details))details.open=false;
+    }
+    document.addEventListener('pointerdown',closeOutside,true);
+    return ()=>document.removeEventListener('pointerdown',closeOutside,true);
+  },[]);
   const models=availability.models;
   const selected=models.find(m=>m.id===value.model);
   const disabled=!availability.ready;
@@ -75,7 +84,7 @@ export function TutorControls({value,onChange,availability}:{value:TutorSettings
       {!selected&&<option value="">{availability.status==='loading'?'查询中…':'暂无可用模型'}</option>}
       {models.map(m=><option key={m.id} value={m.id}>{m.label}{m.deprecated?'（已弃用）':''}</option>)}
     </select></label>
-    <details className="tutor-options" onKeyDown={event=>{if(event.key==='Escape'&&event.currentTarget.open){event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}>
+    <details ref={options} className="tutor-options" onKeyDown={event=>{if(event.key==='Escape'&&event.currentTarget.open){event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}>
     <summary>设置</summary><div>
     <label className="tutor-effort"><span>思考强度</span><select aria-label="思考强度" disabled={disabled||!selected} value={selected?value.reasoningEffort:''} onChange={e=>onChange({...value,reasoningEffort:e.target.value as ReasoningEffort})}>
       {!selected&&<option value="">—</option>}
