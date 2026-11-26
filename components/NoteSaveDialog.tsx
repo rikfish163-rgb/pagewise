@@ -60,12 +60,13 @@ export default function NoteSaveDialog({intent, notes, onConfirm, onClose, busy 
   const sources = intent ? [...new Map(intent.sources.map(source => [sourceLine(source), source])).values()] : [];
   const choice: NoteSaveChoice = mode === 'create' ? {mode: 'create'} : {mode: 'append', noteId: targetId};
   const saved = receipt?.status === 'saved';
-  const canConfirm = !!intent && !busy && !saved && (mode === 'create' || !!target);
+  const retrying = receipt?.status === 'error' && !!receipt.noteId;
+  const lockDestination = busy || saved || retrying;
+  const canConfirm = !!intent && !busy && !saved && (retrying || mode === 'create' || !!target);
   const targetLabel = mode === 'append' && target ? noteSaveChoiceLabel(choice, notes) : '新建笔记';
 
   function confirm() {
     if (!canConfirm) return;
-    if (mode === 'append' && !targetId) return;
     onConfirm(choice);
   }
 
@@ -91,10 +92,10 @@ export default function NoteSaveDialog({intent, notes, onConfirm, onClose, busy 
 
       <section className="nsd-choice" aria-label="保存方式">
         <div className="nsd-modes" role="group" aria-label="新建或追加">
-          <button type="button" aria-pressed={mode === 'create'} disabled={busy || saved} onClick={() => setMode('create')}>
+          <button type="button" aria-pressed={mode === 'create'} disabled={lockDestination} onClick={() => setMode('create')}>
             <FilePlus2 size={16} aria-hidden="true"/>新建笔记
           </button>
-          <button type="button" aria-pressed={mode === 'append'} disabled={busy || saved || !notes.length}
+          <button type="button" aria-pressed={mode === 'append'} disabled={lockDestination || !notes.length}
             title={!notes.length ? '还没有可追加的笔记' : undefined} onClick={() => setMode('append')}>
             <NotebookPen size={16} aria-hidden="true"/>追加到已有笔记{notes.length ? ` · ${notes.length}` : ''}
           </button>
@@ -106,11 +107,11 @@ export default function NoteSaveDialog({intent, notes, onConfirm, onClose, busy 
             <label className="nsd-search" htmlFor={searchId}><Search size={15} aria-hidden="true"/>
               <span className="nsd-sr-only">搜索要追加的笔记</span>
               <input id={searchId} type="search" value={query} placeholder="搜索编号、标题或正文"
-                disabled={busy || saved} onChange={event => setQuery(event.target.value)}/>
+                disabled={lockDestination} onChange={event => setQuery(event.target.value)}/>
             </label>
             {matching.length > 0
               ? <ul className="nsd-list" aria-label="选择要追加的笔记">{matching.map(note =>
-                <li key={note.id}><button type="button" aria-pressed={note.id === targetId} disabled={busy || saved}
+                <li key={note.id}><button type="button" aria-pressed={note.id === targetId} disabled={lockDestination}
                   onClick={() => setTargetId(note.id)}>
                   <span className="nsd-note-head"><span className="nsd-number">{noteNumber(note.number)}</span>
                     <strong>{note.title || '未命名笔记'}</strong>{note.id === targetId && <Check size={15} aria-hidden="true"/>}</span>
@@ -125,7 +126,7 @@ export default function NoteSaveDialog({intent, notes, onConfirm, onClose, busy 
       </section>
 
       {receipt?.status === 'error' && <p className="nsd-receipt is-error" role="alert">
-        <strong>没有保存</strong>{receipt.error || '请重试。'}
+        <strong>未确认保存</strong>{receipt.error || '请重试。'}
       </p>}
       {saved && <p className="nsd-receipt is-saved" role="status">
         <Check size={16} aria-hidden="true"/>已保存到 {receipt?.noteNumber

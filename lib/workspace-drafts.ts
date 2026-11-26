@@ -44,6 +44,8 @@ export function emptyDraftBook(): DraftBook {
 function cleanCitation(value: unknown): Omit<DraftCitation, 'image'> | null {
   if (!value || typeof value !== 'object') return null;
   const item = value as Record<string, unknown>;
+  // A filename or screenshot label cannot substitute for the missing image.
+  if (item.kind === 'attachment' || item.image) return null;
   if (!validPage(item.page)) return null;
   if (item.text !== undefined && (typeof item.text !== 'string' || item.text.length > MAX_SOURCE_TEXT)) return null;
   if (item.rect !== undefined && !validRect(item.rect)) return null;
@@ -73,8 +75,9 @@ function cleanDraft(value: unknown): WorkspaceDraft | null {
     : undefined;
   const rawCitations = Array.isArray(draft.citations) ? draft.citations : [];
   const citations = rawCitations.map(cleanCitation).filter((item): item is Omit<DraftCitation, 'image'> => !!item).slice(0, MAX_CITATIONS);
-  const imageLost = draft.imageLost === true || !!rawSelection?.image || rawCitations.some(item => !!(item as Record<string, unknown>)?.image);
-  if (!text.trim() && !citations.length && !selection) return null;
+  const imageLost = draft.imageLost === true || (draft.omitImage !== true && !!rawSelection?.image)
+    || rawCitations.some(item => item?.kind === 'attachment' || !!item?.image);
+  if (!text.trim() && !citations.length && !selection && !imageLost) return null;
   return {
     docId: draft.docId, threadId: draft.threadId, text, citations,
     omitPrimary: draft.omitPrimary === true, omitImage: draft.omitImage === true,

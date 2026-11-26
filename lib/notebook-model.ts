@@ -42,9 +42,7 @@ export type NotebookInsert = {
   title: string;
   text: string;
   sources: NoteSourceInput[];
-  // Absent means create, so inserts queued before this field existed still work.
-  mode?: 'create' | 'append';
-};
+} & ({mode?: 'create'} | {mode: 'append'; requestId: string});
 
 export type NotebookInsertResult = {
   id: number;
@@ -86,11 +84,11 @@ export function notebookInsertMode(insert: NotebookInsert): 'create' | 'append' 
   return insert.mode === 'append' ? 'append' : 'create';
 }
 
-export function notebookInsertRequest(insert: NotebookInsert, requestId: string) {
-  if (notebookInsertMode(insert) === 'append') {
+export function notebookInsertRequest(insert: NotebookInsert) {
+  if (insert.mode === 'append') {
     return {
       path: `/${encodeURIComponent(insert.noteId)}`,
-      body: {mode: 'append' as const, text: insert.text, sources: insert.sources, requestId},
+      body: {mode: 'append' as const, text: insert.text, sources: insert.sources, requestId: insert.requestId},
     };
   }
   return {

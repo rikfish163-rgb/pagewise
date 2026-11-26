@@ -31,11 +31,12 @@ test('save choices name the real target note and scope', () => {
 test('old inserts without a mode still create, append never sends a whole body', () => {
   const base = {id: 7, noteId: 'note-3', title: '摘录', text: '新内容', sources: [{project: '信号处理', page: 21}]};
   assert.equal(notebookInsertMode(base), 'create');
-  assert.equal(notebookInsertMode({...base, mode: 'append'}), 'append');
-  assert.deepEqual(notebookInsertRequest(base, 'request-a'), {
+  const insert = {...base, mode: 'append', requestId: 'request-b'};
+  assert.equal(notebookInsertMode(insert), 'append');
+  assert.deepEqual(notebookInsertRequest(base), {
     path: '', body: {id: 'note-3', title: '摘录', body: '新内容', sources: [{project: '信号处理', page: 21}]},
   });
-  const append = notebookInsertRequest({...base, mode: 'append'}, 'request-b');
+  const append = notebookInsertRequest(insert);
   assert.equal(append.path, '/note-3');
   assert.deepEqual(append.body, {mode: 'append', text: '新内容', sources: [{project: '信号处理', page: 21}], requestId: 'request-b'});
   assert.ok(!('body' in append.body), 'append must not send a replacement body');

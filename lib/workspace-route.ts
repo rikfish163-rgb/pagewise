@@ -20,6 +20,11 @@ export function parseWorkspaceRoute(search: string): WorkspaceRoute {
   };
 }
 
+export function workspaceReaderStart(page: number | undefined, savedPage: number, navigation?: PerformanceNavigationTiming['type']) {
+  // The synced URL on reload names the current page, just as a fresh link does.
+  return {page: page ?? savedPage, resume: page === undefined || (navigation === 'reload' && page === savedPage)};
+}
+
 /** Keep document, discussion and page in the address bar instead of stripping them. */
 export function workspaceRouteUrl(base: {pathname: string; hash?: string}, route: WorkspaceRoute): string {
   const params = new URLSearchParams();

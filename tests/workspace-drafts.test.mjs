@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   draftStorageKey, emptyDraftBook, parseDraftBook, saveDraft, removeDraft, draftsForDoc, draftForThread,
 } from '../lib/workspace-drafts.ts';
-import { parseWorkspaceRoute, workspaceRouteUrl } from '../lib/workspace-route.ts';
+import { parseWorkspaceRoute, workspaceReaderStart, workspaceRouteUrl } from '../lib/workspace-route.ts';
 
 const draft={
   docId:'doc-a',threadId:'draft-1',text:'我还没想明白的问题',
@@ -37,6 +37,24 @@ test('image data URLs and credentials never enter draft storage',()=>{
   assert.ok(!stored.includes('base64'));
   assert.ok(!stored.includes('session-secret'));
   assert.deepEqual(draftForThread(parsed,'draft-1').selection,{page:3});
+  assert.deepEqual(draftForThread(parsed,'draft-1').citations,[]);
+});
+
+test('drafts already saved with stripped attachments still warn after reopening and editing',()=>{
+  const stored={...draft,citations:[draft.citations[0],{page:3,text:'截图',kind:'attachment'}]};
+  const parsed=parseDraftBook(JSON.stringify({version:1,drafts:{'draft-1':stored}}));
+  const restored=draftForThread(parsed,'draft-1');
+  assert.equal(restored.imageLost,true);
+  assert.deepEqual(restored.citations,[draft.citations[0]]);
+  const edited=saveDraft(parsed,{...restored,text:'修改后的问题'});
+  assert.equal(draftForThread(edited,'draft-1').imageLost,true);
+});
+
+test('a removed primary image does not leave a missing-image warning',()=>{
+  const book=saveDraft(emptyDraftBook(),{
+    ...draft,omitImage:true,selection:{page:3,image:'data:image/png;base64,removed'},
+  });
+  assert.equal(draftForThread(book,'draft-1').imageLost,false);
 });
 
 test('malformed drafts and empty drafts are discarded instead of resurrecting stale state',()=>{
@@ -64,6 +82,13 @@ test('the reader route keeps document, discussion and page across reload and cop
   assert.match(url,/discussion=t-1/);
   assert.match(url,/page=7/);
   assert.equal(parseWorkspaceRoute(url.split('?')[1]).page,7);
+});
+
+test('reloading a saved page resumes its anchor while opening its link starts at the page top',()=>{
+  assert.deepEqual(workspaceReaderStart(7,7,'reload'),{page:7,resume:true});
+  assert.deepEqual(workspaceReaderStart(7,7,'navigate'),{page:7,resume:false});
+  assert.deepEqual(workspaceReaderStart(7,4,'reload'),{page:7,resume:false});
+  assert.deepEqual(workspaceReaderStart(undefined,7,'navigate'),{page:7,resume:true});
 });
 
 test('invalid or hostile route values are ignored, not copied into the reader',()=>{

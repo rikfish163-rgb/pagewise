@@ -23,6 +23,7 @@ export type NotebookProps = {
   currentSource?: NoteSourceInput;
   view: NotebookView;
   inserts: NotebookInsert[];
+  retryInsertId: number | null;
   onInsertResult: (result: NotebookInsertResult) => void;
   onNotesChange: (notes: StudyNote[]) => void;
   onExpand: (noteId?: string) => void;
@@ -50,7 +51,7 @@ const threadLabel = (thread: Discussion) => thread.messages.some(message => mess
   : `第 ${thread.page} 页 · ${thread.text && thread.text !== '按页提问' ? thread.text.slice(0, 60) : '笔记对话'}`;
 
 export default function Notebook({
-  visible, full, panelHost, docs, threads, projects, currentSource, view, inserts,
+  visible, full, panelHost, docs, threads, projects, currentSource, view, inserts, retryInsertId,
   onInsertResult, onNotesChange, onExpand, onClose, onOpenSource,
 }: NotebookProps) {
   const [store, setStore] = useState<Store>({});
@@ -169,17 +170,19 @@ export default function Notebook({
     setOperationError('');
     window.dispatchEvent(new Event('pagewise:credits-changed'));
   }, [changeStore]);
-  const appendRequests = useRef(new Map<number, string>());
+  useEffect(() => {
+    if (retryInsertId === null || !failed.current.delete(retryInsertId)) return;
+    setOperationError('');
+    setQueueTick(value => value + 1);
+  }, [retryInsertId]);
   useEffect(() => {
     if (!loaded || processing.current) return;
     const item = inserts.find(insert => !processed.current.has(insert.id) && !failed.current.has(insert.id));
     if (!item) return;
     processing.current = true;
     const mode = notebookInsertMode(item);
-    const requestId = mode === 'append' ? (appendRequests.current.get(item.id) ?? crypto.randomUUID()) : '';
-    if (mode === 'append') appendRequests.current.set(item.id, requestId);
     onInsertResult({id: item.id, noteId: item.noteId, mode, status: 'saving'});
-    const request = notebookInsertRequest(item, requestId);
+    const request = notebookInsertRequest(item);
     noteRequest<{note: StudyNote}>(request.path, request.body)
       .then(({note}) => {
         if (!mounted.current) return;
