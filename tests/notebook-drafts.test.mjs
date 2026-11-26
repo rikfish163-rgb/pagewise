@@ -33,3 +33,14 @@ test('switching notes keeps drafts independent and conflicts remain editable for
   assert.equal(conflict.error, '其他窗口已更新');
   assert.equal(conflict.note.body, '需要导出的合并稿');
 });
+
+test('a save response landing after a conflict keeps the draft and the merge state', () => {
+  const draft = editNoteEntry(savedNoteEntry(note), {body: '冲突后的草稿'});
+  const conflicted = {...draft, status: 'conflict', error: '已追加到服务器，但这里有未保存的编辑。'};
+  const pending = {note: conflicted.note, version: conflicted.version, revision: 1, requestId: 'request-a'};
+  const late = completeNoteSave(conflicted, pending, {...note, body: '服务器较早的版本', revision: 2});
+  assert.equal(late.status, 'conflict');
+  assert.equal(late.note.body, '冲突后的草稿');
+  assert.equal(late.saved.body, '服务器较早的版本');
+  assert.equal(late.error, '已追加到服务器，但这里有未保存的编辑。');
+});

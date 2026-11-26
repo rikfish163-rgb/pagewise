@@ -227,6 +227,8 @@
   100% { box-shadow: 0 0 0 14px transparent; }
 }
 
+.reader-page-stack > .reader-annotated-page + .reader-annotated-page { margin-top: 20px; }
+
 .reader-annotated-page {
   position: relative;
   display: flex;
@@ -397,6 +399,113 @@
 .reader-jump { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 .reader-jump input { font: inherit; }
 
+.reader-tools { position: relative; }
+.reader-tools > summary { list-style: none; }
+.reader-tools > summary::-webkit-details-marker { display: none; }
+
+.reader-tools-body {
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reader-tools-body > .reader-mode {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius-control) + 2px);
+  background: var(--wash);
+  box-shadow: inset 0 1px 0 var(--edge-highlight);
+}
+
+.reader-quick { flex: none; }
+
+.reader-page-status {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  padding: 24px;
+  background: rgb(255 255 255 / 88%);
+  color: #5a5a5a;
+  font-size: .9rem;
+  line-height: 1.6;
+  text-align: center;
+  place-items: center;
+  pointer-events: none;
+}
+
+.reader-page-status.is-empty {
+  inset: auto 8px 8px;
+  display: block;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+  font-size: .78rem;
+}
+
+.reader-text-reading {
+  max-width: 46rem;
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 18px 20px 44px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+}
+
+.reader-text-heading {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 10px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--muted);
+  font-size: .82rem;
+}
+
+.reader-text-heading > span:first-child { color: var(--ink); font-weight: 600; }
+.reader-text-total { margin-right: auto; }
+
+.reader-text-heading button,
+.reader-text-status button {
+  min-height: 34px;
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--wash);
+  color: var(--accent-ink);
+  white-space: nowrap;
+}
+
+.reader-text-body {
+  font-size: 1.0625rem;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.reader-text-status {
+  padding: 34px 12px;
+  color: var(--muted);
+  line-height: 1.8;
+  text-align: center;
+}
+
+.reader-text-status button { margin: 0 4px; background: var(--paper); }
+.reader-text-status.is-error { color: var(--error); }
+
 .reader-jump input {
   width: 3.4em;
   min-height: 30px;
@@ -451,9 +560,91 @@
   .reader-toolbar { justify-content: flex-start; }
 }
 
+@media (min-width: 768px) {
+  .reader-tools { display: contents; }
+  .reader-tools > summary { display: none; }
+  .reader-tools-body { display: flex; }
+}
+
 @media (max-width: 767px) {
   .reader-scroll { padding: 12px; }
   .reader-selection-actions { max-width: calc(100% - 12px); }
+
+  .reader-toolbar { gap: 6px; padding: 6px; flex-wrap: wrap; position: relative; }
+  .workspace .desk .document-reader .reader-toolbar button,
+  .workspace .desk .document-reader .reader-tools > summary,
+  .workspace .desk .document-reader .reader-display > summary,
+  .workspace .desk .document-reader .reader-thumbnails > summary {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 8px 10px;
+    white-space: nowrap;
+  }
+  .workspace .desk .document-reader .reader-toolbar > div { min-height: 44px; }
+  .workspace .desk .document-reader .reader-jump input { min-height: 40px; font-size: 16px; }
+  .reader-pager { flex: 0 1 auto; }
+  .reader-jump { gap: 6px; }
+  .reader-jump input { width: 3.8em; }
+  .reader-quick { flex: none; }
+  .reader-tools { flex: none; position: static; }
+  .reader-tools > .reader-tools-body { display: none; }
+  .reader-tools > summary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    background: var(--paper);
+    box-shadow: inset 0 1px 0 var(--edge-highlight);
+    color: var(--ink-secondary);
+    cursor: pointer;
+  }
+  .reader-tools[open] > summary { border-color: var(--line-hover); color: var(--accent-ink); }
+  .reader-tools[open] > .reader-tools-body {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 6px);
+    right: 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: min(460px, calc(100vw - 20px));
+    max-height: min(60vh, 460px);
+    padding: 10px;
+    overflow: auto;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    background: var(--glass-strong);
+    box-shadow: inset 0 1px 0 var(--edge-highlight), var(--shadow-2);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    backdrop-filter: blur(20px) saturate(140%);
+  }
+  .reader-tools-body > .reader-mode {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: calc(var(--radius-control) + 2px);
+    background: var(--wash);
+  }
+  .reader-tools-body .reader-thumbnails[open] > div,
+  .reader-tools-body .reader-display > div {
+    position: static;
+    width: 100%;
+    max-width: 100%;
+    margin-top: 6px;
+  }
+
+  .reader-text-reading {
+    min-height: 100%;
+    padding: 12px 14px 32px;
+    border-radius: 10px;
+  }
+  .reader-text-body { font-size: 1.0625rem; line-height: 1.95; }
+  .reader-text-heading { gap: 8px; }
+  .reader-text-heading button { min-height: 40px; }
 }
 
 @media (max-width: 760px) {
@@ -463,8 +654,8 @@
 
 @media (max-width: 640px) {
   .reader-toolbar { align-items: stretch; gap: 6px; padding: 6px; }
-  .reader-toolbar > div { min-height: 40px; }
-  .reader-toolbar button { justify-content: center; min-width: 36px; min-height: 36px; }
+  .reader-toolbar > div { min-height: 44px; }
+  .reader-toolbar button { justify-content: center; min-width: 44px; min-height: 44px; }
   .reader-jump { font-size: 14px; }
   .reader-scroll { padding: 10px; }
 }

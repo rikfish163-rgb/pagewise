@@ -57,6 +57,9 @@ export default defineConfig(async ({ command }) => {
       sites({ mockAuth: !managedLinux }),
       connectorPreview(),
       cloudflare({
+        persistState: process.env.PAGEWISE_LOCAL_STATE_DIR
+          ? { path: process.env.PAGEWISE_LOCAL_STATE_DIR }
+          : true,
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         inspectorPort: false,
         config: {

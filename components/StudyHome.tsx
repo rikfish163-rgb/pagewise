@@ -1,8 +1,13 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
-import { ArrowRight, BookOpen, ChevronRight, FileText, FolderOpen, History, MessageSquareText, MoreHorizontal, NotebookPen, Plus, Search, X } from 'lucide-react';
-import type { Discussion, StudyDoc } from '../lib/workspace-model';
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { ArrowRight, BookOpen, ChevronRight, FileText, FolderOpen, History, MessageSquareText, MoreHorizontal, NotebookPen, PencilLine, Plus, Quote, RotateCcw, Search, X } from 'lucide-react';
+import { discussionTitle, type Discussion, type StudyDoc } from '../lib/workspace-model';
+import type { StudyNote } from '../lib/notebook-model';
+import { noteExcerpt, noteNumber } from '../lib/notebook-model';
+import { buildReview } from '../lib/review-model';
+import { docTitle, searchStudy, type StudySearchResult } from '../lib/study-search';
+import { evidencePageLabel, stageLabels, type ProjectMemoryView } from '../lib/learning-memory';
 import './study-home.css';
 import { readProgress, subscribeReadingProgress } from './reading-progress';
 import PaperLeaves from './PaperLeaves';
@@ -13,7 +18,11 @@ export type StudyHomeProps = {
   onCreateProject: (name:string) => Promise<string>;
   onManageProject: (action:'rename'|'delete',project:string,target?:string) => Promise<void>;
   threads?: Discussion[];
+  notes?: StudyNote[];
   onOpenDoc: (doc: StudyDoc, page?: number, threadId?: string) => void;
+  onOpenNote?: (noteId:string) => void;
+  onPractice?: (doc:StudyDoc, threadId:string) => void;
+  loadMemory?: (project:string) => Promise<ProjectMemoryView>;
   onMoveDoc: (doc: StudyDoc) => void;
   onPinDoc: (doc: StudyDoc) => void;
   onRemoveDoc: (doc: StudyDoc) => void;
@@ -30,11 +39,23 @@ export type StudyHomeProps = {
 function dateLabel(value?: number) {
   return value && Number.isFinite(value) ? new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(value) : '尚未阅读';
 }
-const title = (doc: StudyDoc) => doc.name.replace(/\.(pdf|pptx)$/i, '');
+const title = (doc: StudyDoc) => docTitle(doc);
 
-export default function StudyHome({ docs, savedProjects = [], onCreateProject, onManageProject, onMoveDoc, onPinDoc, onRemoveDoc, active, backgroundPaused, threads = [], onOpenDoc, onImport, onSample, onOpenMemory, onOpenNotebook, loading = false, error }: StudyHomeProps) {
+function Highlight({text, term}:{text:string; term:string}) {
+  const index = term ? text.toLocaleLowerCase().indexOf(term.toLocaleLowerCase()) : -1;
+  if (index < 0) return <>{text}</>;
+  return <>{text.slice(0, index)}<mark>{text.slice(index, index + term.length)}</mark>{text.slice(index + term.length)}</>;
+}
+
+const resultIcons = {
+  project: FolderOpen, doc: FileText, question: MessageSquareText,
+  answer: BookOpen, excerpt: Quote, note: NotebookPen,
+} as const;
+
+export default function StudyHome({ docs, savedProjects = [], onCreateProject, onManageProject, onMoveDoc, onPinDoc, onRemoveDoc, active, backgroundPaused, threads = [], notes = [], onOpenDoc, onOpenNote, onPractice, loadMemory, onImport, onSample, onOpenMemory, onOpenNotebook, loading = false, error }: StudyHomeProps) {
   const [query, setQuery] = useState('');
   const [project, setProject] = useState<string | null>(null);
+  const [surface, setSurface] = useState<'library' | 'review'>('library');
   const [mobileProjects, setMobileProjects] = useState(false);
   const projectTrigger=useRef<HTMLButtonElement>(null);
   const projectClose=useRef<HTMLButtonElement>(null);
@@ -105,7 +126,7 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
 
   const activeProject = project !== null && projects.includes(project) ? project : null;
   const search = query.trim().toLocaleLowerCase();
-  const ordered = [...docs].sort((a, b) => (b.visited || 0) - (a.visited || 0) || a.name.localeCompare(b.name, 'zh-CN'));
+  const ordered = useMemo(() => [...docs].sort((a, b) => (b.visited || 0) - (a.visited || 0) || a.name.localeCompare(b.name, 'zh-CN')), [docs]);
   const checkpointState=useSyncExternalStore(subscribeReadingProgress,()=>ordered.flatMap(doc=>{
     const progress=readProgress(doc.id);
     return progress?[`${doc.id}:${progress.page}`]:[];
@@ -118,23 +139,51 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
   const recentPage=recent?checkpoints.get(recent.id):null;
   const visible = ordered.filter(doc=>activeProject===null||doc.course===activeProject);
   const searchScope=searchAll?null:activeProject;
-  const matchingProjects=search?projects.filter(name=>(searchScope===null||name===searchScope)&&name.toLocaleLowerCase().includes(search)):[];
-  const matchingDocs=search?ordered.filter(doc=>(searchScope===null||doc.course===searchScope)&&doc.name.toLocaleLowerCase().includes(search)):[];
-  const documentsById=new Map(ordered.map(doc=>[doc.id,doc]));
-  const matchingQuestions=search?threads.flatMap(thread=>{
-    const doc=documentsById.get(thread.docId);
-    if(!doc||(searchScope!==null&&searchScope!==doc.course))return [];
-    return thread.messages.flatMap((message,index)=>message.role==='user'&&message.content.toLocaleLowerCase().includes(search)?[{doc,thread,message,index}]:[]);
-  }):[];
+  const searchGroups = useMemo(() => search
+    ? searchStudy({docs: ordered, threads, notes, query, project: searchScope ?? ''})
+    : [], [ordered, threads, notes, search, searchScope, query]);
   const recentDocs=ordered.slice(0,5);
   const sortedVisible = sort === 'name'
     ? [...visible].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }) || a.id.localeCompare(b.id))
     : [...visible].sort((a,b)=>Number(b.pinned??false)-Number(a.pinned??false));
 
+  const review = useMemo(()=>buildReview({docs: ordered, threads, notes}), [ordered, threads, notes]);
+  const [memoryTick,setMemoryTick]=useState(0);
+  const [memory,setMemory]=useState<{course:string; loading:boolean; view?:ProjectMemoryView; error?:string}|null>(null);
+  useEffect(()=>{
+    if(surface!=='review'||!activeProject||!loadMemory){setMemory(null);return;}
+    let current=true;
+    setMemory({course:activeProject,loading:true});
+    loadMemory(activeProject)
+      .then(view=>{if(current)setMemory({course:activeProject,loading:false,view});})
+      .catch(reason=>{if(current)setMemory({course:activeProject,loading:false,error:reason instanceof Error?reason.message:'主题暂时无法读取。'});});
+    return()=>{current=false;};
+  },[surface,activeProject,loadMemory,memoryTick]);
+
   function openSearchResult(doc:StudyDoc,page?:number,threadId?:string){
     returningToSearch.current=true;
     searchDialog.current?.close();
     onOpenDoc(doc,page,threadId);
+  }
+  function openNoteResult(note:StudyNote,docId?:string,page?:number,threadId?:string){
+    if(onOpenNote){returningToSearch.current=true;searchDialog.current?.close();onOpenNote(note.id);return;}
+    const doc=ordered.find(item=>item.id===docId);
+    if(doc)openSearchResult(doc,page,threadId);
+  }
+  function openSearchHit(result:StudySearchResult){
+    if(result.kind==='project'){setProject(result.title);setSurface('library');searchDialog.current?.close();return;}
+    const doc=ordered.find(item=>item.id===result.docId);
+    if(result.kind==='note'){
+      const note=notes.find(item=>item.id===result.noteId);
+      if(note)openNoteResult(note,result.docId,result.page,result.threadId);
+      return;
+    }
+    if(doc)openSearchResult(doc,result.page,result.threadId);
+  }
+  function openReviewNote(note:StudyNote,docId?:string,page?:number,threadId?:string){
+    if(onOpenNote){onOpenNote(note.id);return;}
+    const doc=ordered.find(item=>item.id===docId);
+    if(doc)onOpenDoc(doc,page,threadId);
   }
   function closeProjects(){setMobileProjects(false);projectTrigger.current?.focus();}
 
@@ -155,13 +204,80 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
     return ()=>window.removeEventListener('keydown',shortcut);
   },[active]);
 
+  const reviewDocs = activeProject ? review.documents.filter(item=>item.doc.course===activeProject) : review.documents;
+  const reviewNotes = activeProject ? review.notes.filter(item=>item.project===activeProject) : review.notes;
+  const reviewCards = memory?.course===activeProject ? memory.view?.cards ?? [] : [];
+  const reviewEmpty = !reviewDocs.length && !reviewNotes.length && !reviewCards.length;
+
+  function reviewSurface(){
+    if(reviewEmpty && !memory?.loading && !memory?.error) return <div className="sh-review-empty">
+      <span className="sh-empty-icon"><RotateCcw size={32} strokeWidth={1.3}/></span>
+      <h2>还没有可复习的内容</h2>
+      <p>在资料里提出一个问题，或把选区存入笔记。这里会按真实页码和主题整理复习入口，不生成虚构章节。</p>
+      <button type="button" onClick={()=>onImport(activeProject??undefined)}>导入资料</button>
+    </div>;
+    return <div className="sh-review">
+      {reviewDocs.length>0&&<section className="sh-review-docs" aria-labelledby="sh-review-docs-title">
+        <div className="sh-document-toolbar"><h2 id="sh-review-docs-title">按资料和页码</h2><span className="sh-review-meta">来自真实提问</span></div>
+        {reviewDocs.map(({doc,entries})=><article className="sh-review-doc" key={doc.id}>
+          <header><button type="button" onClick={()=>onOpenDoc(doc)}><FileText size={16} aria-hidden="true"/><strong>{title(doc)}</strong><small>{doc.course}</small></button></header>
+          <ul>{entries.map(entry=><li className="sh-review-entry" key={entry.key} data-answered={entry.answered}>
+            <button type="button" className="sh-review-page" onClick={()=>onOpenDoc(doc,entry.page,entry.threadId)}>第 {entry.page} 页</button>
+            <div className="sh-review-copy"><strong>{entry.title}</strong>
+              <span>{entry.answered?'已讲解':'还没有回答'}{entry.noteIds.length?` · ${entry.noteIds.length} 条笔记`:''}</span></div>
+            <div className="sh-review-actions">
+              {entry.answered&&onPractice&&<button type="button" onClick={()=>onPractice(doc,entry.threadId)}><PencilLine size={14} aria-hidden="true"/>自测</button>}
+              <button type="button" onClick={()=>onOpenDoc(doc,entry.page,entry.threadId)}>回到原文<ChevronRight size={14} aria-hidden="true"/></button>
+            </div>
+            {entry.noteIds.length>0&&<div className="sh-review-note-links">{entry.noteIds.map(id=>{
+              const note=notes.find(item=>item.id===id);
+              return note?<button type="button" key={id} onClick={()=>openReviewNote(note,doc.id,entry.page,entry.threadId)}>{noteNumber(note.number)} {note.title||'未命名笔记'}</button>:null;
+            })}</div>}
+          </li>)}</ul>
+        </article>)}
+      </section>}
+      {activeProject&&loadMemory&&<section className="sh-review-topics" aria-labelledby="sh-review-topics-title">
+        <div className="sh-document-toolbar"><h2 id="sh-review-topics-title">知识主题</h2>
+          {onOpenMemory&&<button type="button" className="sh-memory-link" onClick={()=>onOpenMemory(activeProject)}>在项目记忆中查看</button>}</div>
+        {memory?.loading?<p className="sh-review-hint" role="status">正在读取项目主题…</p>
+          :memory?.error?<div className="sh-review-error" role="alert"><span>{memory.error}</span><button type="button" onClick={()=>setMemoryTick(value=>value+1)}>重新读取</button></div>
+          :reviewCards.length>0?<ul className="sh-topic-list">{reviewCards.map(card=>{
+            const evidence=card.evidence.find(source=>source.kind==='gap')??card.evidence[0];
+            const thread=evidence?threads.find(item=>item.id===evidence.threadId):undefined;
+            const doc=thread?ordered.find(item=>item.id===thread.docId):undefined;
+            return <li key={card.key} data-stage={card.stage}>
+              <span className="sh-topic-stage">{stageLabels[card.stage]}</span>
+              <strong>{card.topic}</strong>
+              {evidence&&<small>{evidence.file} · {evidencePageLabel(evidence)}</small>}
+              <div className="sh-review-actions">
+                {doc&&evidence&&onPractice&&card.stage!=='mastered'&&<button type="button" onClick={()=>onPractice(doc,evidence.threadId)}><PencilLine size={14} aria-hidden="true"/>自测</button>}
+                {doc&&evidence&&<button type="button" onClick={()=>onOpenDoc(doc,evidence.page,evidence.threadId)}>回到来源</button>}
+              </div>
+            </li>;
+          })}</ul>
+          :<p className="sh-review-hint">完成一轮课件问答后，学习主题会整理到这里。已掌握状态在项目记忆中切换。</p>}
+      </section>}
+      {reviewNotes.length>0&&<section className="sh-review-notebook" aria-labelledby="sh-review-notebook-title">
+        <div className="sh-document-toolbar"><h2 id="sh-review-notebook-title">笔记</h2><span className="sh-review-meta">{reviewNotes.length} 条已保存</span></div>
+        <ul className="sh-note-review">{reviewNotes.map(item=><li key={item.note.id}>
+          <button type="button" onClick={()=>openReviewNote(item.note,item.docId,item.page,item.threadId)}>
+            <span className="sh-review-number">{noteNumber(item.note.number)}</span>
+            <span className="sh-review-copy"><strong>{item.note.title||'未命名笔记'}</strong><span>{noteExcerpt(item.note.body)||'还没有正文'}</span></span>
+            <small>{[item.project,item.page?`第 ${item.page} 页`:''].filter(Boolean).join(' · ')||'独立笔记'}</small>
+          </button>
+        </li>)}</ul>
+      </section>}
+    </div>;
+  }
+
   return <section className="study-home" aria-label="学习项目首页" aria-busy={loading}>
     <PaperLeaves active={active&&activeProject===null} paused={backgroundPaused||searching}/>
     {mobileProjects&&<button type="button" className="sh-project-backdrop" tabIndex={-1} aria-label="关闭项目目录" onClick={closeProjects}/>}
     <aside id="home-projects" className={`sh-sidebar${mobileProjects?' is-open':''}`} aria-label="项目导航" onKeyDown={event=>{if(event.key==='Escape'&&mobileProjects)closeProjects();}}>
       <div className="sh-space"><span className="sh-space-icon"><BookOpen size={20} /></span><div><strong>我的学习空间</strong></div></div>
       <div className="sh-project-drawer-heading"><strong>我的项目</strong><button ref={projectClose} type="button" aria-label="关闭项目目录" onClick={closeProjects}><X size={18}/></button></div>
-      <button type="button" className="sh-nav-item" aria-current={activeProject === null ? 'page' : undefined} onClick={() => {setProject(null);setMobileProjects(false)}}><FolderOpen size={18} /><span>全部项目</span><small>{projects.length}</small></button>
+      <button type="button" className="sh-nav-item" aria-current={activeProject === null && surface==='library' ? 'page' : undefined} onClick={() => {setProject(null);setSurface('library');setMobileProjects(false)}}><FolderOpen size={18} /><span>全部项目</span><small>{projects.length}</small></button>
+      <button type="button" className="sh-nav-item" aria-current={surface==='review'?'page':undefined} onClick={()=>{setSurface('review');setMobileProjects(false);}}><RotateCcw size={17}/><span>复习</span><small>{review.total}</small></button>
       {onOpenNotebook&&<button type="button" className="sh-nav-item" onClick={()=>{setMobileProjects(false);onOpenNotebook();}}><NotebookPen size={17}/><span>笔记本</span></button>}
       <div className="sh-project-heading">
         <span>我的项目</span>
@@ -223,7 +339,7 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
       </form>}
     </dialog>
     <div className="sh-main">
-      <header className="sh-header"><h1>{activeProject ?? '学习首页'}</h1><div className="sh-header-actions">
+      <header className="sh-header"><h1>{activeProject ?? (surface==='review'?'复习':'学习首页')}</h1><div className="sh-header-actions">
         <button ref={projectTrigger} type="button" className="sh-project-switch" aria-controls="home-projects" aria-expanded={mobileProjects} onClick={()=>{setMobileProjects(true);requestAnimationFrame(()=>projectClose.current?.focus());}}><FolderOpen size={16}/>{activeProject??'全部项目'}</button>
         <button ref={searchButton} type="button" className="sh-search-trigger" aria-label="搜索资料库" aria-haspopup="dialog" onClick={()=>{setSearchAll(false);searchDialog.current?.showModal();searchInput.current?.focus();setSearching(true);}}><Search size={17}/><span>搜索</span><kbd className="sh-search-shortcut" aria-hidden="true">⌘K</kbd></button>
         <button type="button" className="sh-primary" onClick={()=>onImport(activeProject??undefined)}><Plus size={17}/>导入资料</button>
@@ -231,7 +347,7 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
       {error && <div className="sh-error" role="alert"><strong>资料暂时未能完整载入</strong><span>{error}</span><span>请刷新页面后重试。</span></div>}
       {loading ? <div className="sh-loading" role="status"><BookOpen size={26} /><p>正在载入你的学习项目…</p></div> : !projects.length ? !error && <div className="sh-empty">
         <span className="sh-empty-icon"><BookOpen size={36} strokeWidth={1.3} /></span><h2>还没有学习资料</h2><p>从右上角导入 PDF 或 PPTX，按课程建立项目。</p><small>单份不超过 20 MiB</small>{onSample && <button type="button" className="sh-sample" onClick={onSample}>打开示例讲义<ArrowRight size={16} /></button>}
-      </div> : <>
+      </div> : surface==='review' ? reviewSurface() : <>
         {recent && activeProject === null && !search && <section className="sh-resume" aria-labelledby="sh-resume-title"><div className="sh-resume-body"><span className="sh-resume-label"><History size={15} />继续学习</span><p className="sh-resume-course">{recent.course}</p><h2 id="sh-resume-title">{title(recent)}</h2><p><span className="sh-resume-date">上次读到第 {recentPage} 页</span></p><button type="button" onClick={() => onOpenDoc(recent)} className="sh-resume-button">继续阅读<ArrowRight size={17} /></button></div><div className="sh-page-motif-wrap" aria-hidden="true"><div className="sh-page-motif"><FileText size={42} strokeWidth={1} /><span>{recent.kind.toUpperCase()}</span></div></div></section>}
         <section className="sh-documents" aria-label={activeProject === null ? '最近资料' : '项目资料'}>
           <div className="sh-document-toolbar"><h2>{activeProject === null ? '最近资料' : '项目资料'}</h2>{activeProject!==null&&<>{onOpenNotebook&&<button type="button" className="sh-memory-link" onClick={()=>onOpenNotebook(activeProject)}>项目笔记</button>}<button type="button" className="sh-memory-link" onClick={()=>onOpenMemory?.(activeProject)}>复习主题</button><select className="sh-sort" aria-label="文件排序方式" value={sort} onChange={event=>setSort(event.target.value==='name'?'name':'recent')}><option value="recent">最近活动</option><option value="name">文件名称</option></select></>}</div>
@@ -261,18 +377,26 @@ export default function StudyHome({ docs, savedProjects = [], onCreateProject, o
       <div className="sh-search-sheet">
         <header><h2 id={searchId+'-title'}>搜索资料库</h2><button type="button" aria-label="关闭搜索" onClick={()=>searchDialog.current?.close()}><X size={18}/></button></header>
         <div className="sh-search-tools">
-          <label className="sh-search" htmlFor={searchId}><Search size={17}/><span className="sh-sr-only">搜索项目、资料或提问</span>
-            <input ref={searchInput} id={searchId} type="search" autoFocus value={query} placeholder="搜索项目、资料或提问"
+          <label className="sh-search" htmlFor={searchId}><Search size={17}/><span className="sh-sr-only">搜索项目、资料、提问、回答、摘录或笔记</span>
+            <input ref={searchInput} id={searchId} type="search" autoFocus value={query} placeholder="搜索项目、资料、提问、回答、摘录或笔记"
               onCompositionStart={()=>setComposing(true)} onCompositionEnd={()=>setComposing(false)} onChange={event=>setQuery(event.target.value)}/>
             {query&&<button type="button" aria-label="清除搜索" onClick={()=>{setQuery('');searchInput.current?.focus();}}><X size={16}/></button>}
           </label>
           {activeProject!==null&&<select aria-label="搜索范围" value={searchAll?'all':'project'} onChange={event=>setSearchAll(event.target.value==='all')}><option value="project">当前项目</option><option value="all">全部项目</option></select>}
         </div>
         {search&&!composing&&<div className="sh-search-results">
-          {matchingProjects.length>0&&<section><h3>项目</h3>{matchingProjects.map(name=><button type="button" key={name} onClick={()=>{setProject(name);searchDialog.current?.close();}}><FolderOpen size={16}/>{name||'未分类项目'}</button>)}</section>}
-          {matchingDocs.length>0&&<section><h3>资料</h3>{matchingDocs.map(doc=><button type="button" key={doc.id} title={doc.name} onClick={()=>openSearchResult(doc)}><FileText size={16} aria-hidden="true" className="sh-result-icon"/><span className="sh-result-copy"><span>{title(doc)}</span><small>{doc.course} · {doc.kind.toUpperCase()}</small></span></button>)}</section>}
-          {matchingQuestions.length>0&&<section><h3>提问</h3>{matchingQuestions.map(({doc,thread,message,index})=><button type="button" key={`${thread.id}-${index}`} onClick={()=>openSearchResult(doc,message.page??thread.page,thread.id)}><MessageSquareText size={16} aria-hidden="true" className="sh-result-icon"/><span className="sh-result-copy"><span>{message.content}</span><small>{title(doc)} · 第 {message.page??thread.page} 页</small></span></button>)}</section>}
-          {!matchingProjects.length&&!matchingDocs.length&&!matchingQuestions.length&&<p role="status">没有找到匹配的项目、资料或提问。</p>}
+          {searchGroups.map(group=><section key={group.kind} aria-label={group.label}><h3>{group.label}</h3>{group.results.map(result=>{
+            const Icon=resultIcons[result.kind];
+            return <button type="button" key={result.key} title={result.title} onClick={()=>openSearchHit(result)}>
+              <Icon size={16} aria-hidden="true" className="sh-result-icon"/>
+              <span className="sh-result-copy">
+                <span><Highlight text={result.title} term={query.trim()}/></span>
+                {result.snippet&&<span className="sh-result-snippet"><Highlight text={result.snippet} term={query.trim()}/></span>}
+                <small>{result.meta}</small>
+              </span>
+            </button>;
+          })}</section>)}
+          {!searchGroups.length&&<p role="status">没有找到匹配的项目、资料、提问、回答、摘录或笔记。</p>}
         </div>}
         <footer className="sh-search-footer"><kbd>Esc</kbd><span>关闭</span></footer>
       </div>

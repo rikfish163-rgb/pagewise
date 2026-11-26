@@ -25,6 +25,9 @@ export function editNoteEntry(entry: NoteEntry, change: Partial<StudyNote>): Not
 // A response confirms only its captured edit. Text typed while it was in flight
 // remains a draft and will be saved against the new server revision.
 export function completeNoteSave(entry: NoteEntry, pending: NoteSave, saved: StudyNote): NoteEntry {
+  // A conflict already holds text the student must merge. A response that was
+  // in flight when the conflict appeared must not clear that draft.
+  if (entry.status === 'conflict') return {...entry, saved, pending: undefined};
   const unchanged = entry.version === pending.version;
   return {
     note: unchanged ? saved : {...entry.note, revision: saved.revision},

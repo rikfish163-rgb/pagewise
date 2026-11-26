@@ -1,5 +1,6 @@
-import {noteSourceKey, type NoteSource, type NoteSourceInput, type StudyNote} from '../lib/notebook-model.ts';
-import {changed, persistWithCredit, validRequestId} from './learning-credits.ts';
+import {appendNoteBody, noteSourceKey, type NoteSource, type NoteSourceInput, type StudyNote} from '../lib/notebook-model.ts';
+import {discussionTopic, type Discussion} from '../lib/workspace-model.ts';
+import {changed, learningCreditAward, persistWithCredit, validRequestId} from './learning-credits.ts';
 import {projectName} from './study-projects.ts';
 
 type NoteRow = {
@@ -17,10 +18,14 @@ type Catalog = {docs: Map<string, DocRow>; threads: Map<string, ThreadRow>; proj
 
 class NoteError extends Error {
   status: number;
-  constructor(message: string, status = 400) {super(message); this.status = status;}
+  code?: string;
+  constructor(message: string, status = 400, code?: string) {super(message); this.status = status; this.code = code;}
 }
 const reply = (body: unknown, status = 200) =>
   Response.json(body, {status, headers: {'Cache-Control': 'private, no-store'}});
+const appendTextHash = async (text: string) => [...new Uint8Array(
+  await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
+  .map(byte => byte.toString(16).padStart(2, '0')).join('');
 export const legacyNoteId = (owner: string) => `legacy-notebook:${owner}`;
 
 function sourceSnapshot(row: SourceRow): NoteSource {
@@ -50,11 +55,17 @@ function sourceView(source: NoteSource, catalog: Catalog): NoteSource {
   };
 }
 
+// The source snapshot must match the topic the student sees in the margin.
+// A short follow-up such as "1/q" is not a topic, so use A's shared helper
+// instead of keeping a second title rule on the server.
 function discussionLabel(thread: ThreadRow): string {
-  const messages = JSON.parse(thread.messages) as {role: string; content: string}[];
-  return (messages.findLast(message => message.role === 'user')?.content.trim()
-    || (thread.selection_text === '按页提问' ? '' : thread.selection_text?.trim())
-    || `第 ${thread.page} 页的对话`).replace(/\s+/g, ' ').slice(0, 120);
+  const messages = JSON.parse(thread.messages) as Discussion['messages'];
+  const topic = discussionTopic({
+    id: thread.id, docId: thread.doc_id, page: thread.page,
+    ...(thread.selection_text ? {text: thread.selection_text} : {}),
+    messages,
+  });
+  return (topic === '未发送的问题' ? `第 ${thread.page} 页的对话` : topic).replace(/\s+/g, ' ').slice(0, 120);
 }
 const sourceIdentity = (source: NoteSource) =>
   [noteSourceKey(source), source.project, source.docId ?? null, source.threadId ?? null, source.page ?? null];
@@ -217,15 +228,65 @@ export async function handleNotes(request: Request, path: string[], db: D1Databa
       // Check before resolving sources: a saved source may have been deleted
       // between the original create and a retry of its lost response.
       const existing = (await readNotes(db, owner, noteId as string))[0];
-      if (existing) return reply({note: existing});
+      if (existing) {
+        // A lost response may be replayed with the same id. Different content
+        // under that id is a different note, not a successful retry.
+        const sameTitle = input.title === undefined
+          || (typeof input.title === 'string' && (input.title.trim() || '未命名笔记') === existing.title);
+        const sameBody = input.body === undefined || input.body === existing.body;
+        const sameSources = input.sources === undefined || (Array.isArray(input.sources)
+          && JSON.stringify(input.sources.map(source => noteSourceKey(source as NoteSourceInput)).sort())
+            === JSON.stringify(existing.sources.map(source => source.key).sort()));
+        if (sameTitle && sameBody && sameSources) return reply({note: existing});
+        throw new NoteError('这个笔记标识已保存了其他内容，请使用新的保存标识。', 409, 'note_exists');
+      }
+    }
+    const token = input.requestId === undefined ? crypto.randomUUID() : input.requestId;
+    if (!validRequestId(token)) throw new NoteError('笔记保存标识无效，请重试。');
+    if (input.mode === 'append') {
+      // Appending is its own intent: the caller never sends a replacement body,
+      // so an edit made in another window cannot be overwritten here.
+      if (!id || !previous) throw new NoteError('请选择要追加的笔记。', 404);
+      const addition = typeof input.text === 'string' ? appendNoteBody('', input.text) : '';
+      if (!addition) throw new NoteError('请提供要追加的内容。');
+      const oldSources = (await readNotes(db, owner, previous.id))[0].sources;
+      const body = appendNoteBody(previous.body, addition);
+      if (body.length > 250000) throw new NoteError('每条笔记最多 25 万字。');
+      const sources = resolveSources([...oldSources, ...(Array.isArray(input.sources) ? input.sources : [])],
+        await sourceCatalog(db, owner), oldSources);
+      const now = Date.now();
+      const legacy = previous.id === legacyNoteId(owner);
+      const hash = await appendTextHash(addition);
+      // The ledger remembers every append request, not just the last token, so
+      // a replay still converges after another window appended in between.
+      const action = db.prepare(`UPDATE study_notes SET body=?,revision=revision+1,write_token=?,updated_at=?
+        WHERE id=? AND owner=? AND revision=?${legacy
+          ? ' AND NOT EXISTS(SELECT 1 FROM notebooks WHERE owner=? AND revision>?)' : ''}
+          AND NOT EXISTS(SELECT 1 FROM study_note_writes WHERE owner=? AND note_id=? AND request_id=?)`)
+        .bind(body, token, now, previous.id, owner, previous.revision,
+          ...(legacy ? [owner, previous.revision] : []), owner, previous.id, token);
+      const ledger = db.prepare(`INSERT OR IGNORE INTO study_note_writes(owner,note_id,request_id,text_hash,created_at)
+        SELECT ?,?,?,?,? WHERE changes()>0`).bind(owner, previous.id, token, hash, now);
+      const following = sourceWrites(db, owner, previous.id, token, sources);
+      if (legacy) following.push(db.prepare(`UPDATE notebooks SET body=?,revision=?
+        WHERE owner=? AND EXISTS(SELECT 1 FROM study_notes WHERE id=? AND owner=? AND write_token=?)`)
+        .bind(body, previous.revision + 1, owner, previous.id, owner, token));
+      const [saved] = await db.batch([action, ledger,
+        learningCreditAward(db, owner, 'note_saved', previous.id, true, now), ...following]);
+      if (!changed(saved)) {
+        const prior = await db.prepare(`SELECT text_hash FROM study_note_writes
+          WHERE owner=? AND note_id=? AND request_id=?`).bind(owner, previous.id, token)
+          .first<{text_hash: string}>();
+        if (prior?.text_hash === hash) return reply({note: (await readNotes(db, owner, previous.id))[0]});
+        return reply({error: '笔记已在其他窗口更新。请先导出当前编辑，再读取已保存版本。', code: 'note_changed'}, 409);
+      }
+      return reply({note: (await readNotes(db, owner, previous.id))[0]});
     }
     const body = input.body;
     const title = input.title === undefined ? previous?.title ?? '未命名笔记' : input.title;
     if (typeof body !== 'string' || body.length > 250000) throw new NoteError('每条笔记最多 25 万字。');
     if (typeof title !== 'string' || title.trim().length > 120) throw new NoteError('笔记标题最多 120 字。');
     if (input.number !== undefined && !validNumber(input.number)) throw new NoteError('笔记编号须为 1 到 999999999 的整数。');
-    const token = input.requestId === undefined ? crypto.randomUUID() : input.requestId;
-    if (!validRequestId(token)) throw new NoteError('笔记保存标识无效，请重试。');
     const oldSources = previous ? (await readNotes(db, owner, previous.id))[0].sources : [];
     const sources = resolveSources(input.sources ?? oldSources, await sourceCatalog(db, owner), oldSources);
     if (previous && (!Number.isSafeInteger(input.revision) || Number(input.revision) < 1))
@@ -265,7 +326,11 @@ export async function handleNotes(request: Request, path: string[], db: D1Databa
     }
     return reply({note: (await readNotes(db, owner, noteId as string))[0]});
   } catch (error) {
-    if (error instanceof NoteError) return reply({error: error.message}, error.status);
+    if (error instanceof NoteError) return reply({error: error.message, ...(error.code ? {code: error.code} : {})}, error.status);
+    // The batch is transactional, so a missing ledger table leaves the note and
+    // its reward untouched. Say that instead of a generic outage.
+    if (error instanceof Error && /no such table: (main\.)?study_note_writes/i.test(error.message))
+      return reply({error: '笔记追加需要完成数据库升级，本次没有保存任何内容。请稍后重试。', code: 'note_write_ledger_missing'}, 503);
     if (error instanceof SyntaxError) return reply({error: '笔记格式无效。'}, 400);
     if (error instanceof Error && /UNIQUE constraint failed: study_notes.owner, study_notes.number/i.test(error.message))
       return reply({error: '已有相同编号的笔记，请换一个编号。', code: 'note_number_taken'}, 409);

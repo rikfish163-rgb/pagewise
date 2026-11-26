@@ -25,20 +25,79 @@ export type StudyNote = {
   sources: NoteSource[];
 };
 
+// A save starts from what the student actually selected or read. The dialog
+// shows this intent before anything is written.
+export type NoteSaveIntent = {
+  kind: 'selection' | 'answer' | 'discussion';
+  title: string;
+  text: string;
+  sources: NoteSourceInput[];
+};
+
+export type NoteSaveChoice = {mode: 'create'} | {mode: 'append'; noteId: string};
+
 export type NotebookInsert = {
   id: number;
   noteId: string;
   title: string;
   text: string;
   sources: NoteSourceInput[];
+  // Absent means create, so inserts queued before this field existed still work.
+  mode?: 'create' | 'append';
 };
 
 export type NotebookInsertResult = {
   id: number;
   noteId: string;
+  mode: 'create' | 'append';
+  noteTitle?: string;
+  noteNumber?: number;
   status: 'saving' | 'saved' | 'error';
   error?: string;
 };
+
+const saveScopeLabels: Record<NoteSaveIntent['kind'], string> = {
+  selection: '讲义选区', answer: '一轮回答', discussion: '整段讨论',
+};
+
+export function noteSaveScopeLabel(intent: NoteSaveIntent): string {
+  return saveScopeLabels[intent.kind];
+}
+
+export function noteSaveChoiceLabel(choice: NoteSaveChoice, notes: StudyNote[]): string {
+  if (choice.mode === 'create') return '新建笔记';
+  const note = notes.find(item => item.id === choice.noteId);
+  return note ? `追加到 ${noteNumber(note.number)} · ${note.title || '未命名笔记'}` : '追加到已删除的笔记';
+}
+
+// One definition for both the client preview and the server write, so the
+// append never rewrites or reorders the text already in the note. Existing
+// trailing newlines stay exactly as written; only a missing gap is filled.
+export function appendNoteBody(body: string, text: string): string {
+  const addition = text.replace(/^\s+/, '').replace(/\s+$/, '');
+  if (!addition) return body;
+  if (!body.trim()) return addition;
+  const existing = body.replace(/[ \t]+$/, '');
+  const trailing = existing.match(/\n*$/)?.[0].length ?? 0;
+  return `${existing}${'\n'.repeat(Math.max(0, 2 - trailing))}${addition}`;
+}
+
+export function notebookInsertMode(insert: NotebookInsert): 'create' | 'append' {
+  return insert.mode === 'append' ? 'append' : 'create';
+}
+
+export function notebookInsertRequest(insert: NotebookInsert, requestId: string) {
+  if (notebookInsertMode(insert) === 'append') {
+    return {
+      path: `/${encodeURIComponent(insert.noteId)}`,
+      body: {mode: 'append' as const, text: insert.text, sources: insert.sources, requestId},
+    };
+  }
+  return {
+    path: '',
+    body: {id: insert.noteId, title: insert.title, body: insert.text, sources: insert.sources},
+  };
+}
 
 export function noteSourceKey(source: NoteSourceInput): string {
   return source.threadId ? `thread:${source.threadId}`

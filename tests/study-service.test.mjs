@@ -291,6 +291,46 @@ test('local gateway answers persist with optimistic concurrency',async()=>{
  s.ctx.owner='bob';assert.equal((await s.req('threads/'+t+'/local-answer','POST',turn)).status,404);
 });
 
+test('each answer persists validated per-round sources and rejects forged evidence before inference',async()=>{
+ const s=setup(),doc=await s.doc(),thread=await s.thread(doc,'傅里叶变换');
+ const sources=[{docId:doc,page:1,text:'傅里叶变换',kind:'selection'},{docId:doc,page:2,text:'频谱',kind:'page'}];
+ const result=await s.req('threads/'+thread+'/ask','POST',{question:'解释',sources});
+ assert.equal(result.status,200);
+ assert.deepEqual(result.data.sources,sources);
+ const saved=(await s.req('state')).data.threads.find(item=>item.id===thread);
+ assert.deepEqual(saved.messages.at(-1).sources,sources);
+ assert.equal(saved.messages.at(-2).sources,undefined);
+ const before=(await s.req('state')).data.threads.find(item=>item.id===thread).messages.length;
+ for(const forged of [
+   [{docId:'another-document',page:1}],
+   [{docId:doc,page:0}],
+   [{docId:doc,page:2.5}],
+   [{docId:doc,page:1,text:'x'.repeat(701)}],
+   Array.from({length:13},(_,i)=>({docId:doc,page:i+1})),
+ ]) {
+   assert.equal((await s.req('threads/'+thread+'/ask','POST',{question:'伪造',sources:forged})).status,400);
+ }
+ assert.equal((await s.req('state')).data.threads.find(item=>item.id===thread).messages.length,before);
+ const local=await s.req('threads/'+thread+'/local-answer','POST',{question:'本机问',answer:'本机答',previous:before,sources:[sources[0]]});
+ assert.equal(local.status,200);
+ assert.deepEqual(local.data.sources,[sources[0]]);
+ const afterLocal=(await s.req('state')).data.threads.find(item=>item.id===thread);
+ assert.deepEqual(afterLocal.messages.at(-1).sources,[sources[0]]);
+ assert.equal((await s.req('threads/'+thread+'/local-answer','POST',{question:'坏来源',answer:'答',previous:before+2,sources:[{docId:'x',page:1}]})).status,400);
+});
+
+test('legacy answers without stored sources still load unchanged',async()=>{
+ const s=setup(),doc=await s.doc(),thread=await s.thread(doc);
+ const sql=s.sql;
+ sql.prepare('UPDATE threads SET messages=? WHERE id=?').run(JSON.stringify([
+   {role:'user',content:'旧问题',createdAt:1,page:4},
+   {role:'assistant',content:'旧回答',createdAt:2},
+ ]),thread);
+ const saved=(await s.req('state')).data.threads.find(item=>item.id===thread);
+ assert.equal(saved.messages.at(-1).content,'旧回答');
+ assert.equal(saved.messages.at(-1).sources,undefined);
+});
+
 test('removing the primary quotation sends only the remaining context',async()=>{
  const s=setup(),doc=await s.doc(),thread=await s.thread(doc,'第一段选文');
  await s.req('threads/'+thread+'/ask','POST',{question:'请解释',omitPrimaryText:true,context:'第二段选文'});

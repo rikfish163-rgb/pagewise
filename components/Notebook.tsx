@@ -5,7 +5,7 @@ import {createPortal} from 'react-dom';
 import {BookOpen, ChevronLeft, FileText, Link2, MessageSquare, NotebookPen, Plus, Search, Trash2, X} from 'lucide-react';
 import {discussionTitle, type Discussion, type StudyDoc} from '../lib/workspace-model';
 import {
-  currentNoteSource, matchingNotes, noteExcerpt, noteNumber, noteSourceKey,
+  currentNoteSource, matchingNotes, noteExcerpt, noteNumber, noteSourceKey, notebookInsertMode, notebookInsertRequest,
   type NotebookInsert, type NotebookInsertResult, type NoteSource, type NoteSourceInput, type StudyNote,
 } from '../lib/notebook-model';
 import {completeNoteSave, editNoteEntry, savedNoteEntry, type NoteEntry} from '../lib/notebook-drafts';
@@ -157,23 +157,41 @@ export default function Notebook({
     setOperationError('');
     window.dispatchEvent(new Event('pagewise:credits-changed'));
   }, [changeStore]);
+  // An append lands on the server against the note's saved text. A local draft
+  // typed meanwhile is kept, marked for merge, and can never overwrite it.
+  const acceptAppended = useCallback((note: StudyNote) => {
+    changeStore(previous => {
+      const entry = previous[note.id];
+      if (!entry || entry.status === 'saved') return {...previous, [note.id]: savedNoteEntry(note)};
+      return {...previous, [note.id]: {...entry, saved: note, pending: undefined, status: 'conflict',
+        error: '已追加到服务器，但这里有未保存的编辑。导出后重新读取已保存版本。'}};
+    });
+    setOperationError('');
+    window.dispatchEvent(new Event('pagewise:credits-changed'));
+  }, [changeStore]);
+  const appendRequests = useRef(new Map<number, string>());
   useEffect(() => {
     if (!loaded || processing.current) return;
     const item = inserts.find(insert => !processed.current.has(insert.id) && !failed.current.has(insert.id));
     if (!item) return;
     processing.current = true;
-    onInsertResult({id: item.id, noteId: item.noteId, status: 'saving'});
-    noteRequest<{note: StudyNote}>('', {id: item.noteId, title: item.title, body: item.text, sources: item.sources})
+    const mode = notebookInsertMode(item);
+    const requestId = mode === 'append' ? (appendRequests.current.get(item.id) ?? crypto.randomUUID()) : '';
+    if (mode === 'append') appendRequests.current.set(item.id, requestId);
+    onInsertResult({id: item.id, noteId: item.noteId, mode, status: 'saving'});
+    const request = notebookInsertRequest(item, requestId);
+    noteRequest<{note: StudyNote}>(request.path, request.body)
       .then(({note}) => {
         if (!mounted.current) return;
-        processed.current.add(item.id); acceptCreated(note);
-        onInsertResult({id: item.id, noteId: note.id, status: 'saved'});
+        processed.current.add(item.id);
+        if (mode === 'append') acceptAppended(note); else acceptCreated(note);
+        onInsertResult({id: item.id, noteId: note.id, mode, noteTitle: note.title, noteNumber: note.number, status: 'saved'});
       }).catch(error => {
         if (!mounted.current) return;
         failed.current.add(item.id); setOperationError(error.message);
-        onInsertResult({id: item.id, noteId: item.noteId, status: 'error', error: error.message});
+        onInsertResult({id: item.id, noteId: item.noteId, mode, status: 'error', error: error.message});
       }).finally(() => {processing.current = false; if (mounted.current) setQueueTick(value => value + 1);});
-  }, [inserts, loaded, queueTick, acceptCreated, onInsertResult]);
+  }, [inserts, loaded, queueTick, acceptCreated, acceptAppended, onInsertResult]);
 
   const notes = Object.values(store).map(entry => entry.note);
   const filtered = matchingNotes(notes, {project, threadId, query});

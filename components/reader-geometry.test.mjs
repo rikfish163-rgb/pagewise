@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizedRect, pixelRect, pageWithin } from './reader-geometry.ts';
+import { locateAnchor, scrollTopFor } from './reading-position.ts';
+import { isSparseText, layoutPdfText } from './reader-text.ts';
+import { annotationsVisible, pageRenderState } from './reader-page-state.ts';
 
 test('crop aligns CSS drag coordinates to backing pixels at any zoom', () => {
   const rect = normalizedRect([250, 150], [150, 100], { left: 100, top: 50, width: 400, height: 200 });
@@ -15,4 +18,69 @@ test('pages use a one-based bounded contract', () => {
   assert.equal(pageWithin(0, 4), 1);
   assert.equal(pageWithin(99, 4), 4);
   assert.equal(pageWithin(2.8, 4), 2);
+});
+
+test('live scroll position maps to the page under the viewport top', () => {
+  const boxes = [
+    { top: 24, height: 1000 },
+    { top: 1244, height: 1000 },
+    { top: 2464, height: 1000 },
+  ];
+  assert.deepEqual(locateAnchor(boxes, 24), { anchorPage: 1, fraction: 0 });
+  assert.deepEqual(locateAnchor(boxes, 524), { anchorPage: 1, fraction: 0.5 });
+  assert.deepEqual(locateAnchor(boxes, 1244), { anchorPage: 2, fraction: 0 });
+  assert.deepEqual(locateAnchor(boxes, 2964), { anchorPage: 3, fraction: 0.5 });
+});
+
+test('anchor position clamps at the document edges and is not stale progress', () => {
+  const boxes = [
+    { top: 0, height: 800 },
+    { top: 800, height: 800 },
+  ];
+  assert.deepEqual(locateAnchor(boxes, -50), { anchorPage: 1, fraction: 0 });
+  assert.deepEqual(locateAnchor(boxes, 5000), { anchorPage: 2, fraction: 1 });
+  assert.equal(scrollTopFor(boxes, 2, 0), 800);
+  assert.equal(scrollTopFor(boxes, 2, 0.25), 1000);
+  assert.equal(scrollTopFor(boxes, 9, 0.5), 1200);
+  assert.equal(scrollTopFor([], 3, 0.5), 0);
+});
+
+const item = (str, y, x = 0, size = 12) => ({ str, transform: [size, 0, 0, size, x, y], width: str.length * size * 0.5 });
+
+test('pdf text items group into readable lines without inventing content', () => {
+  const items = [
+    item('第一行', 700, 50),
+    item('继续', 700, 120),
+    item('第二行', 680, 50),
+    item('尾部', 640, 50),
+  ];
+  assert.equal(layoutPdfText(items), '第一行继续\n第二行\n\n尾部');
+});
+
+test('pdf text keeps latin word gaps and drops empty runs', () => {
+  const items = [
+    item('Hello', 700, 50),
+    item('world', 700, 100),
+    item('  ', 700, 160),
+    item('Next', 686, 50),
+  ];
+  assert.equal(layoutPdfText(items), 'Hello world\nNext');
+  assert.equal(layoutPdfText([]), '');
+});
+
+test('sparse text is reported instead of pretending the page has a text layer', () => {
+  assert.equal(isSparseText(''), true);
+  assert.equal(isSparseText('图 1'), true);
+  assert.equal(isSparseText('这一页有足够长的可读正文，学生可以直接在手机上阅读。'), false);
+});
+
+test('page render state gates annotations and visible feedback', () => {
+  assert.equal(pageRenderState({ busy: true, error: '', hasText: false }), 'loading');
+  assert.equal(pageRenderState({ busy: false, error: '读取失败', hasText: false }), 'error');
+  assert.equal(pageRenderState({ busy: false, error: '', hasText: false }), 'empty-text');
+  assert.equal(pageRenderState({ busy: false, error: '', hasText: true }), 'ready');
+  assert.equal(annotationsVisible('ready'), true);
+  assert.equal(annotationsVisible('empty-text'), true);
+  assert.equal(annotationsVisible('loading'), false);
+  assert.equal(annotationsVisible('error'), false);
 });

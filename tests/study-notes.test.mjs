@@ -58,7 +58,10 @@ function setup({legacy} = {}) {
     number: note.number, title: note.title, body: note.body, sources: note.sources,
     revision: note.revision, requestId: crypto.randomUUID(), ...value,
   });
-  return {sql, ctx, req, doc, thread, create, save};
+  const append = (note, text, value = {}) => req(`notes/${note.id}`, 'POST', {
+    mode: 'append', text, requestId: crypto.randomUUID(), ...value,
+  });
+  return {sql, ctx, req, doc, thread, create, save, append};
 }
 
 test('numbered notes connect discussions across projects and remain owner scoped', async () => {
@@ -237,4 +240,160 @@ test('project renames and document moves update notebook sources and their delet
   assert.equal(source.project, '数学');
   assert.equal(source.available, false);
   assert.equal(notes.find(note => note.id === projectNote.id).sources[0].project, '信号与系统');
+});
+
+test('appending keeps existing text, title and sources instead of replacing them', async () => {
+  const s = setup(), docId = s.doc(), threadId = s.thread(docId);
+  const note = (await s.create({body: '已有的卷积笔记', sources: [{project: '信号处理'}]})).data.note;
+  const appended = await s.append(note, '## 第 21 页\n\n> 新摘录', {
+    sources: [{project: '信号处理', docId, threadId}],
+    // A caller cannot smuggle a replacement body or title into an append.
+    body: '覆盖后的正文', title: '覆盖后的标题', number: 99,
+  });
+  assert.equal(appended.status, 200);
+  assert.equal(appended.data.note.body, '已有的卷积笔记\n\n## 第 21 页\n\n> 新摘录');
+  assert.equal(appended.data.note.title, note.title);
+  assert.equal(appended.data.note.number, note.number);
+  assert.equal(appended.data.note.revision, note.revision + 1);
+  assert.deepEqual(appended.data.note.sources.map(source => source.project), ['信号处理', '信号处理']);
+  assert.equal(appended.data.note.sources.length, 2);
+  assert.equal(appended.data.note.sources[1].discussionTitle, '如何理解卷积？');
+  assert.equal((await s.req(`notes/${note.id}`)).data.note.body, '已有的卷积笔记\n\n## 第 21 页\n\n> 新摘录');
+});
+
+test('appending to an empty note starts the body and trims only the new edges', async () => {
+  const s = setup();
+  const note = (await s.create({body: ''})).data.note;
+  const appended = await s.append(note, '\n\n  第一段内容  \n\n');
+  assert.equal(appended.status, 200);
+  assert.equal(appended.data.note.body, '第一段内容');
+  assert.equal((await s.append(appended.data.note, '   ')).status, 400);
+  assert.equal((await s.append(appended.data.note, '')).status, 400);
+  assert.equal((await s.append(appended.data.note, 'x'.repeat(250001))).status, 400);
+});
+
+test('a replayed append does not duplicate text or rewards, and a changed replay is rejected', async () => {
+  const s = setup();
+  const note = (await s.create({body: '原正文'})).data.note;
+  const requestId = crypto.randomUUID(), text = '只追加一次的内容';
+  const first = await s.append(note, text, {requestId});
+  const replay = await s.append(note, text, {requestId});
+  assert.equal(first.status, 200);
+  assert.deepEqual(replay.data, first.data);
+  assert.equal((await s.req(`notes/${note.id}`)).data.note.body, '原正文\n\n只追加一次的内容');
+  assert.equal(s.sql.prepare("SELECT COUNT(*) n FROM learning_credits WHERE kind='note_saved'").get().n, 1);
+  assert.equal((await s.append(note, '另一个内容', {requestId})).status, 409);
+  assert.equal((await s.req(`notes/${note.id}`)).data.note.body, '原正文\n\n只追加一次的内容');
+});
+
+test('a concurrent edit between read and append is reported as changed, never overwritten', async () => {
+  const s = setup();
+  const note = (await s.create({body: '原正文'})).data.note;
+  const batch = s.ctx.db.batch;
+  s.ctx.db.batch = async statements => {
+    s.ctx.db.batch = batch;
+    s.sql.prepare('UPDATE study_notes SET body=?,revision=revision+1 WHERE id=?').run('另一个窗口写入', note.id);
+    return batch(statements);
+  };
+  const result = await s.append(note, '追加内容');
+  assert.equal(result.status, 409);
+  assert.equal(result.data.code, 'note_changed');
+  assert.equal((await s.req(`notes/${note.id}`)).data.note.body, '另一个窗口写入');
+  const retried = await s.append((await s.req(`notes/${note.id}`)).data.note, '追加内容');
+  assert.equal(retried.status, 200);
+  assert.equal(retried.data.note.body, '另一个窗口写入\n\n追加内容');
+});
+
+test('appending to the legacy note keeps the old notebook mirror in step', async () => {
+  const s = setup({legacy: {body: '旧笔记正文', revision: 3}});
+  const note = (await s.req('notes')).data.notes[0];
+  const appended = await s.append(note, '新追加的一段');
+  assert.equal(appended.status, 200);
+  assert.equal(appended.data.note.body, '旧笔记正文\n\n新追加的一段');
+  assert.equal((await s.req('notebook')).data.body, '旧笔记正文\n\n新追加的一段');
+  assert.equal((await s.req('notebook')).data.revision, 4);
+  assert.equal(s.sql.prepare('SELECT COUNT(*) n FROM learning_credits').get().n, 1);
+});
+
+test('reusing a create id with different content is rejected instead of silently ignored', async () => {
+  const s = setup(), id = crypto.randomUUID();
+  const input = {id, title: '原题', body: '原文', sources: []};
+  assert.equal((await s.create(input)).status, 200);
+  assert.equal((await s.create(input)).status, 200);
+  const changed = await s.create({id, title: '新题', body: '新文', sources: []});
+  assert.equal(changed.status, 409);
+  assert.equal(changed.data.code, 'note_exists');
+  assert.equal((await s.req(`notes/${id}`)).data.note.body, '原文');
+});
+
+test('a replayed append is recognized even after another append replaced the last write token', async () => {
+  const s = setup();
+  const note = (await s.create({body: '基础'})).data.note;
+  const requestA = crypto.randomUUID(), requestB = crypto.randomUUID();
+  const first = await s.append(note, '甲段', {requestId: requestA});
+  assert.equal(first.status, 200);
+  const second = await s.append(first.data.note, '乙段', {requestId: requestB});
+  assert.equal(second.status, 200);
+  assert.equal(second.data.note.body, '基础\n\n甲段\n\n乙段');
+  const replay = await s.append(second.data.note, '甲段', {requestId: requestA});
+  assert.equal(replay.status, 200);
+  assert.equal(replay.data.note.body, '基础\n\n甲段\n\n乙段');
+  assert.equal(replay.data.note.revision, second.data.note.revision);
+  const changed = await s.append(second.data.note, '丙段', {requestId: requestA});
+  assert.equal(changed.status, 409);
+  assert.equal(changed.data.code, 'note_changed');
+  assert.equal((await s.req(`notes/${note.id}`)).data.note.body, '基础\n\n甲段\n\n乙段');
+  // Daily note rewards are unique, so two appends on one day still earn once.
+  assert.equal(s.sql.prepare("SELECT COUNT(*) n FROM learning_credits WHERE kind='note_saved'").get().n, 1);
+});
+
+test('append on a database without the write ledger fails clearly and saves nothing', async () => {
+  const s = setup();
+  const note = (await s.create({body: '原正文'})).data.note;
+  const rewards = s.sql.prepare("SELECT COUNT(*) n FROM learning_credits WHERE kind='note_saved'").get().n;
+  s.sql.exec('DROP TABLE study_note_writes');
+  const result = await s.append(note, '不能只保存一半');
+  assert.equal(result.status, 503);
+  assert.match(result.data.error, /升级/);
+  assert.equal((await s.req(`notes/${note.id}`)).data.note.body, '原正文');
+  assert.equal((await s.req(`notes/${note.id}`)).data.note.revision, note.revision);
+  assert.equal(s.sql.prepare("SELECT COUNT(*) n FROM learning_credits WHERE kind='note_saved'").get().n, rewards);
+});
+
+test('append idempotency does not expire after many later writes', async () => {
+  const s = setup();
+  let note = (await s.create({body: '起点'})).data.note;
+  const firstRequest = crypto.randomUUID();
+  const first = await s.append(note, '第 1 段', {requestId: firstRequest});
+  assert.equal(first.status, 200);
+  note = first.data.note;
+  for (let index = 2; index <= 205; index += 1) {
+    const next = await s.append(note, `第 ${index} 段`, {requestId: crypto.randomUUID()});
+    assert.equal(next.status, 200);
+    note = next.data.note;
+  }
+  const before = note.body;
+  const replay = await s.append(note, '第 1 段', {requestId: firstRequest});
+  assert.equal(replay.status, 200);
+  assert.equal(replay.data.note.body, before);
+  assert.equal(replay.data.note.revision, note.revision);
+  assert.equal((before.match(/第 1 段/g) ?? []).length, 1);
+});
+
+test('note sources keep the stable discussion topic, not a short follow-up', async () => {
+  const s = setup(), docId = s.doc();
+  const threadId = crypto.randomUUID();
+  s.sql.prepare('INSERT INTO threads(id,owner,doc_id,page,selection_text,messages,refs,created) VALUES(?,?,?,?,?,?,?,?)')
+    .run(threadId, 'alice', docId, 21, '卷积与频谱', JSON.stringify([
+      {role: 'user', content: '卷积和频谱的关系是什么？', page: 21, createdAt: 1},
+      {role: 'assistant', content: '时域卷积对应频域相乘。'},
+      {role: 'user', content: '1/q', page: 22, createdAt: 2},
+    ]), '[]', 1);
+  const note = (await s.create({sources: [{project: '信号处理', docId, threadId}]})).data.note;
+  assert.equal(note.sources[0].discussionTitle, '卷积和频谱的关系是什么？');
+  assert.equal((await s.req('notes')).data.notes[0].sources[0].discussionTitle, '卷积和频谱的关系是什么？');
+  const appended = await s.append(note, '追加后仍保留主题', {sources: [{project: '信号处理', docId, threadId, page: 22}]});
+  assert.equal(appended.status, 200);
+  assert.ok(appended.data.note.sources.every(source => source.discussionTitle !== '1/q'));
+  assert.equal(appended.data.note.sources.at(-1).discussionTitle, '卷积和频谱的关系是什么？');
 });

@@ -11,8 +11,10 @@ import { askPersonal, type probePersonal, checkRuntimeEndpoint, loadProfile, Per
 import { resolveTutorSettings, type TutorModelDiscovery, type TutorProcessing, type TutorSettings } from '../lib/tutor-models.ts';
 import type { TutorInput, TutorAnswer } from './tutor.ts';
 import { lastAnsweredQuestion, memoryContent, difficultyQuestions, projectLearningContext, retrieveMemories } from './memory-retrieval.ts';
+import {sanitizeMessageSources} from '../lib/workspace-sources.ts';
+import type {MessageSource} from '../lib/workspace-model.ts';
 
-type Message = { requestId?:string; role: string; content: string; processing?:TutorProcessing; createdAt?:number; page?:number; excerpt?:string; memorySources?:MemorySourceRef[] };
+type Message = { requestId?:string; role: string; content: string; processing?:TutorProcessing; createdAt?:number; page?:number; excerpt?:string; memorySources?:MemorySourceRef[]; sources?:MessageSource[] };
 type Context = { diagnose?:typeof probePersonal; probe?:typeof probeVision; db:D1Database|undefined; bucket:R2Bucket|undefined; owner:string; displayName?:string|null; key?:string; siteModelPause?:string; siteUsagePricing?:boolean; answer:(input:TutorInput)=>Promise<string|TutorAnswer>; models?:(key:string)=>Promise<TutorModelDiscovery> };
 type Doc = {id:string; owner:string; name:string; kind:string; course:string; object_key:string};
 type Thread = {mastered?:string;id:string; created:number; owner:string; doc_id:string; page:number; selection_text:string|null; image:string|null; rect:string|null; messages:string; refs:string};
@@ -336,10 +338,12 @@ export async function handleStudy(request:Request,path:string[],ctx:Context):Pro
         return json({learningContext:projectLearningContext(candidates,preferred),catalog});
       }
       if(path.length===3&&path[2]==='local-answer'&&request.method==='POST'){
-        const {question,answer,previous,sourcePage,excerpt,memoryKeys}=await request.json() as {question:string;answer:string;previous:number;sourcePage?:number;excerpt?:string;memoryKeys?:string[]};
+        const {question,answer,previous,sourcePage,excerpt,memoryKeys,sources:rawSources}=await request.json() as {question:string;answer:string;previous:number;sourcePage?:number;excerpt?:string;memoryKeys?:string[];sources?:unknown};
         const history=JSON.parse(thread.messages);
         if(typeof question!=='string'||typeof answer!=='string'||!answer.trim()||!question.trim()||answer.length>100000||question.length>4000)return json({error:'问答长度无效'},400);
         if(previous!==history.length)return json({error:'讨论已更新，请刷新'},409);
+        const sources=sanitizeMessageSources(rawSources??[],thread.doc_id);
+        if(!sources)return json({error:'回答的引用来源无效，请重新选择页面。'},400);
         let memorySources:MemorySourceRef[]|undefined;
         if(Array.isArray(memoryKeys)&&memoryKeys.length&&memoryKeys.length<=4){
           const doc=await getDoc(thread.doc_id);
@@ -351,13 +355,15 @@ export async function handleStudy(request:Request,path:string[],ctx:Context):Pro
             memorySources=memorySourceRefs(matched);
           }
         }
-        history.push(questionMessage(question,sourcePage,excerpt),{role:'assistant',content:answer,...(memorySources?.length?{memorySources}:{})});
+        history.push(questionMessage(question,sourcePage,excerpt),{role:'assistant',content:answer,...(memorySources?.length?{memorySources}:{}),...(sources.length?{sources}:{})});
         const result=await persistWithCredit(db,db.prepare('UPDATE threads SET messages=? WHERE id=? AND owner=? AND messages=?').bind(JSON.stringify(history),thread.id,owner,thread.messages),owner,'discussion_completed',thread.id);
-        return (result.meta?.changes??(result as unknown as {changes:number}).changes)?json({answer,refs:[],memorySources,creditsCharged:0}):json({error:'讨论已更新，请刷新'},409);
+        return (result.meta?.changes??(result as unknown as {changes:number}).changes)?json({answer,refs:[],memorySources,...(sources.length?{sources}:{}),creditsCharged:0}):json({error:'讨论已更新，请刷新'},409);
       }
       if(path.length===3&&path[2]==='ask'&&request.method==='POST') {
-        const v=await request.json() as {requestId?:unknown;maxCredits?:unknown;sourcePage?:number;omitPrimaryImage?:boolean; omitPrimaryText?:boolean; context?:string; attachment?:string; source?:unknown; revision?:unknown; question?:unknown; model?:unknown; reasoningEffort?:unknown; speed?:unknown};const question=typeof v.question==='string'?v.question.trim():'';
+        const v=await request.json() as {requestId?:unknown;maxCredits?:unknown;sourcePage?:number;omitPrimaryImage?:boolean; omitPrimaryText?:boolean; context?:string; attachment?:string; source?:unknown; revision?:unknown; question?:unknown; model?:unknown; reasoningEffort?:unknown; speed?:unknown; sources?:unknown};const question=typeof v.question==='string'?v.question.trim():'';
         if(!question||question.length>4000)return json({error:'问题不能为空，且不超过 4000 字。'},400);
+        const sources=sanitizeMessageSources(v.sources??[],thread.doc_id);
+        if(!sources)return json({error:'本轮引用来源无效，请重新选择页面后再提问。'},400);
         if(v.context!==undefined&&(typeof v.context!=='string'||v.context.length>40000))return json({error:'引用过长，请减少页数。'},400);
         if(v.attachment!==undefined&&(typeof v.attachment!=='string'||v.attachment.length>2800000||!/^data:image\/(jpeg|png|webp);base64,[a-zA-Z0-9+/=]+$/.test(v.attachment)))return json({error:'附图格式无效'},400);
         const primaryImage=v.omitPrimaryImage===true?null:thread.image;
@@ -369,7 +375,8 @@ export async function handleStudy(request:Request,path:string[],ctx:Context):Pro
         let operation:SiteOperation|undefined;
         const requestId=typeof v.requestId==='string'?v.requestId:'';
         if(!personal){
-          const parts=[thread.id,question,v.context??null,v.attachment??null,v.omitPrimaryImage??false,v.omitPrimaryText??false,v.sourcePage??null,settings];
+          // Append evidence only when present so pre-source request fingerprints still replay.
+          const parts=[thread.id,question,v.context??null,v.attachment??null,v.omitPrimaryImage??false,v.omitPrimaryText??false,v.sourcePage??null,settings,...(sources.length?[sources]:[])];
           const opened=await openSiteOperation(db,owner,requestId,parts,v.maxCredits,'answer');
           if(opened.reply)return opened.reply;
           operation=opened.operation;
@@ -421,9 +428,9 @@ export async function handleStudy(request:Request,path:string[],ctx:Context):Pro
             const result=personal?await askPersonal(personal,input):await runSiteCall(db,owner,operation!,'answer',{...input,key:ctx.key!,siteUsagePricing:ctx.siteUsagePricing,...settings},ctx.answer);
             const {answer,processing}=typeof result==='string'?{answer:result,processing:undefined}:result;
             if(typeof answer!=='string'||!answer.trim())throw new Error('Empty answer');
-            updated.push({role:'assistant',content:answer,...(processing?{processing}:{}),...(memorySources?{memorySources}:{})});
+            updated.push({role:'assistant',content:answer,...(processing?{processing}:{}),...(memorySources?{memorySources}:{}),...(sources.length?{sources}:{})});
             const usage=operation?siteReceipt(operation):undefined;
-            const response={answer,refs,creditsCharged:usage?.creditsCharged??0,...(processing?{processing}:{}),...(memorySources?{memorySources}:{})};
+            const response={answer,refs,creditsCharged:usage?.creditsCharged??0,...(processing?{processing}:{}),...(memorySources?{memorySources}:{}),...(sources.length?{sources}:{})};
             const finished=personal
               ?await persistWithCredit(db,db.prepare('UPDATE threads SET messages=?,refs=? WHERE id=? AND owner=? AND messages=?').bind(JSON.stringify(updated),JSON.stringify(refs),thread.id,owner,pending),owner,'discussion_completed',thread.id)
               :await settleSiteAnswer(db,{owner,requestId,token:operation!.token,charge:usage!.creditsCharged,threadId:thread.id,pending,messages:JSON.stringify(updated),refs:JSON.stringify(refs),response:JSON.stringify(response),detail:{course:doc.course,documentId:doc.id,documentName:doc.name,threadId:thread.id,question,page:typeof v.sourcePage==='number'&&Number.isSafeInteger(v.sourcePage)&&v.sourcePage>0?v.sourcePage:thread.page,model:usage!.calls.at(-1)?.model??settings.model,source:'site',operation:'answer',...usage}});
