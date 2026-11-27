@@ -4,6 +4,7 @@ import { registerHooks } from 'node:module';
 import { register } from 'tsx/esm/api';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
 
 registerHooks({resolve(specifier,context,next){if(specifier.endsWith('.css'))return {url:'data:text/javascript,export {};',shortCircuit:true};return next(specifier,context);}});
 register();
@@ -28,4 +29,13 @@ test('saved secrets are not accidentally rendered; explicit tests and per-action
  assert.doesNotMatch(html,/server-secret-must-not-render/);
  for(const text of ['连通性','最多发送 4 次文字请求','当前模型测试发送 1 次文字请求','每次测试产生 1 次图片请求费用','重测图片'])assert.ok(html.includes(text));
  const fresh=render(null);assert.match(fresh,/保存时实测默认模型的图片输入/);assert.match(fresh,/1 次随机色卡请求/);assert.match(fresh,/noValidate=""/i);
+});
+
+test('masthead actions reserve enough width for their icon and translated label', () => {
+ const stylesheet = readFileSync(new URL('../components/personal-api.css', import.meta.url), 'utf8');
+ const actionRule = stylesheet.match(/\.masthead \.import-button\s*\{([^}]+)\}/)?.[1];
+ assert.ok(actionRule, 'The shared masthead action styles are present');
+ assert.match(actionRule, /inline-size\s*:\s*auto\s*;/);
+ assert.match(actionRule, /flex-shrink\s*:\s*0\s*;/);
+ assert.match(actionRule, /white-space\s*:\s*nowrap\s*;?/);
 });

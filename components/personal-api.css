@@ -97,6 +97,16 @@
 @media(max-width:600px){.personal-dialog{width:calc(100% - 20px);max-height:calc(100dvh - 20px);border-radius:8px}.personal-header{padding:18px 18px 13px}.personal-header h2{font-size:23px}.personal-tabs{padding:0 18px}.personal-content{padding:20px 16px 0}.personal-row{grid-template-columns:1fr;gap:5px;margin-bottom:16px}.personal-row>label,.personal-row>.personal-label{text-align:left;padding:0;font-size:13px}.personal-protocol>button{font-size:12px!important;padding:5px 7px}.personal-results,.personal-vision,.personal-error,.personal-progress{margin-left:0}.personal-footer{margin-left:-16px;margin-right:-16px;padding:13px 16px 16px}.personal-hint{font-size:12px}.personal-results>div{flex-wrap:wrap}.source-trigger{font-size:12px;padding:6px;margin-right:1px}.personal-model-toolbar{gap:7px}.personal-model-chip{font-size:11px!important}}
 .magpie-fields{margin-top:20px}
 
-.masthead .import-button{inline-size:7.5em;block-size:36px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:14px;white-space:nowrap}
+.masthead .import-button {
+  inline-size: auto;
+  flex-shrink: 0;
+  block-size: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  white-space: nowrap;
+}
 .masthead .import-button.source-trigger{margin-right:0}
 @media(max-width:650px){.masthead .import-button{font-size:12px;block-size:32px}}
