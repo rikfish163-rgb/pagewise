@@ -5,6 +5,7 @@ import { AlignLeft, ChevronLeft, ChevronRight, Scan, TextSelect, ZoomIn, ZoomOut
 import { normalizedRect, pixelRect, pageWithin, type Rect } from './reader-geometry';
 import { locateAnchor, scrollTopFor, type PageBox } from './reading-position';
 import { annotationsVisible, pageRenderState } from './reader-page-state';
+import { snapTextSelection, textMarginCaret, type TextCaret } from './reader-selection';
 import { isSparseText, layoutPdfText, type PdfTextItem } from './reader-text';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import './reader.css';
@@ -511,6 +512,8 @@ function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,defaultRatio,o
   const [drag,setDrag]=useState<Rect|null>(null);
   const surface=useRef<HTMLDivElement>(null),canvas=useRef<HTMLCanvasElement>(null),text=useRef<HTMLDivElement>(null);
   const start=useRef<number[]|null>(null),svg=useRef(''),rendered=useRef(0);
+  const selectionFrame=useRef(0);
+  const marginAnchor=useRef<TextCaret|undefined>(undefined);
   const cropId=useRef<string|null>(null);
   const gesture=useRef(0),cancelled=useRef(false);
   useEffect(()=>{
@@ -535,6 +538,7 @@ function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,defaultRatio,o
     document.addEventListener('keydown',cancelGesture);
     return ()=>{
       document.removeEventListener('keydown',cancelGesture);
+      cancelAnimationFrame(selectionFrame.current);
       if(cropId.current){onCropState(false,cropId.current);cropId.current=null;}
     };
   },[onCropState]);
@@ -618,14 +622,41 @@ function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,defaultRatio,o
 
   const highlight=(mode==='crop'?drag:null)??focusRect;
   return <div ref={surface} data-page={current} className={`reader-page ${kind==='pdf'?'reader-pdf':'reader-pptx'} ${mode==='crop'?'reader-cropping':''}`} style={{width:`${zoom*100}%`,aspectRatio:ratio}}
-        onPointerDown={e=>{cancelled.current=false;gesture.current++;if(mode==='crop' && nearby && !busy && !error){cropId.current=onCropStart();onCropState(true,cropId.current);start.current=[e.clientX,e.clientY];e.currentTarget.setPointerCapture(e.pointerId);e.preventDefault();}}}
+        onPointerDown={event=>{
+          cancelAnimationFrame(selectionFrame.current);
+          marginAnchor.current=undefined;
+          cancelled.current=false;gesture.current++;
+          if(!nearby||busy||error)return;
+          if(mode==='crop'){
+            cropId.current=onCropStart();onCropState(true,cropId.current);
+            start.current=[event.clientX,event.clientY];
+            event.currentTarget.setPointerCapture(event.pointerId);event.preventDefault();
+          }else if(text.current&&event.pointerType==='mouse'&&event.button===0&&!event.shiftKey){
+            marginAnchor.current=textMarginCaret(text.current,event.target,event.clientX,event.clientY);
+          }
+        }}
         onPointerMove={e=>{if(start.current) setDrag(normalizedRect(start.current,[e.clientX,e.clientY],e.currentTarget.getBoundingClientRect()));}}
-        onPointerCancel={()=>{if(cropId.current)onCropState(false,cropId.current);cropId.current=null;start.current=null;setDrag(null);}}
+        onMouseMove={event=>{
+          if(mode!=='text'||busy||error||event.buttons!==1)return;
+          cancelAnimationFrame(selectionFrame.current);
+          const {target,clientX,clientY}=event;
+          // Chromium updates the native range after mousemove handlers run.
+          selectionFrame.current=requestAnimationFrame(()=>{
+            const selected=window.getSelection();
+            if(selected&&text.current)snapTextSelection(selected,text.current,target,clientX,clientY,marginAnchor.current);
+          });
+        }}
+        onPointerCancel={()=>{cancelAnimationFrame(selectionFrame.current);marginAnchor.current=undefined;if(cropId.current)onCropState(false,cropId.current);cropId.current=null;start.current=null;setDrag(null);}}
         onPointerUp={e=>{
+          cancelAnimationFrame(selectionFrame.current);
+          const anchor=marginAnchor.current;
+          marginAnchor.current=undefined;
           if(cancelled.current){window.getSelection()?.removeAllRanges();return;}
           if(start.current) {const rect=normalizedRect(start.current,[e.clientX,e.clientY],e.currentTarget.getBoundingClientRect());const captureId=cropId.current;start.current=null;cropId.current=null;setDrag(null);if(rect&&captureId) void crop(rect,captureId);else if(captureId)onCropState(false,captureId);return;}
           if(mode!=='text'||busy||error||!nearby)return;
-          const selected=window.getSelection();if(!selected?.rangeCount || selected.isCollapsed)return;
+          const selected=window.getSelection();if(!selected?.rangeCount||selected.isCollapsed)return;
+          if(e.pointerType==='mouse'&&e.button===0&&!e.shiftKey&&text.current)snapTextSelection(selected,text.current,e.target,e.clientX,e.clientY,anchor);
+          if(selected.isCollapsed)return;
           const range=selected.getRangeAt(0);if(!surface.current?.contains(range.commonAncestorContainer))return;
           const value=selected.toString().trim();if(!value)return;
           onSelect({page:current,text:value});selected.removeAllRanges();

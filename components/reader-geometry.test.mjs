@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizedRect, pixelRect, pageWithin } from './reader-geometry.ts';
+import { nearestTextRun, normalizedRect, pixelRect, pageWithin } from './reader-geometry.ts';
 import { locateAnchor, scrollTopFor } from './reading-position.ts';
 import { isSparseText, layoutPdfText } from './reader-text.ts';
 import { annotationsVisible, pageRenderState } from './reader-page-state.ts';
@@ -13,6 +13,21 @@ test('crop aligns CSS drag coordinates to backing pixels at any zoom', () => {
 test('selection clips to page and ignores clicks', () => {
   assert.deepEqual(normalizedRect([-20, -30], [1000, 1000], {left: 0, top: 0, width: 400, height: 200}), [0, 0, 1, 1]);
   assert.equal(normalizedRect([10, 10], [11, 11], {left: 0, top: 0, width: 400, height: 200}), null);
+});
+test('text selection in a line margin stays on that line, even when another line is closer horizontally', () => {
+  const shortLine = {left: 20, right: 90, top: 40, bottom: 60};
+  const longLine = {left: 10, right: 300, top: 64, bottom: 84};
+  assert.equal(nearestTextRun([shortLine, longLine], 270, 55), shortLine);
+  assert.equal(nearestTextRun([shortLine, longLine], 14, 50), shortLine);
+  assert.equal(nearestTextRun([shortLine, longLine], 45, 61), shortLine);
+  assert.equal(nearestTextRun([shortLine, longLine], 45, 63), longLine);
+});
+test('text selection in a gap between runs snaps to the nearer edge on the same line', () => {
+  const first = {left: 20, right: 80, top: 40, bottom: 60};
+  const second = {left: 100, right: 150, top: 40, bottom: 60};
+  assert.equal(nearestTextRun([first, second], 84, 50), first);
+  assert.equal(nearestTextRun([first, second], 98, 50), second);
+  assert.equal(nearestTextRun([], 10, 10), undefined);
 });
 test('pages use a one-based bounded contract', () => {
   assert.equal(pageWithin(0, 4), 1);
