@@ -6,11 +6,12 @@ declare namespace Cloudflare {
     hts01?: string;
     PAGEWISE_LEGACY_EMAILS?: string;
     PAGEWISE_ADMIN_EMAILS?: string;
-    AUTHING_ISSUER?: string;
-    AUTHING_CLIENT_ID?: string;
-    AUTHING_CLIENT_SECRET?: string;
-    AUTHING_GOOGLE_CONNECTION_ID?: string;
-    AUTHING_WECHAT_CONNECTION_ID?: string;
+    GOOGLE_CLIENT_ID?: string;
+    GOOGLE_CLIENT_SECRET?: string;
+    GITHUB_CLIENT_ID?: string;
+    GITHUB_CLIENT_SECRET?: string;
+    RESEND_API_KEY?: string;
+    AUTH_EMAIL_FROM?: string;
     SITE_AUTH_ORIGIN?: string;
   }
 }

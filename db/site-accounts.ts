@@ -32,3 +32,17 @@ export const siteLoginTransactions=sqliteTable('site_login_transactions',{
   expiresAt:integer('expires_at').notNull(),
 },t=>[index('site_login_transactions_expiry').on(t.expiresAt),
   index('site_login_transactions_browser').on(t.browserHash)]);
+
+export const siteEmailChallenges=sqliteTable('site_email_challenges',{
+  browserHash:text('browser_hash').primaryKey().notNull(),
+  email:text('email').notNull(),
+  codeHash:text('code_hash').notNull(),
+  returnTo:text('return_to').notNull(),
+  legacyOwner:text('legacy_owner'),
+  sentAt:integer('sent_at').notNull(),
+  attempts:integer('attempts').notNull().default(0),
+  consumed:integer('consumed').notNull().default(0),
+},t=>[
+  index('site_email_challenges_sent').on(t.sentAt),
+  index('site_email_challenges_email_sent').on(t.email,t.sentAt),
+]);

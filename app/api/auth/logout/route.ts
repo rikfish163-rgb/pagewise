@@ -1,4 +1,5 @@
 import { chatGPTSignOutPath } from "@/app/chatgpt-auth";
+import { clearEmailCookie } from "@/server/email-login";
 import {
   authRequestOrigin, clearSessionCookie, clearTransactionCookie,
   revokeExternalSession, sameOriginAuthWrite,
@@ -15,7 +16,7 @@ export async function POST(request: Request): Promise<Response> {
     ? chatGPTSignOutPath("/login") : "/login";
   try {
     await revokeExternalSession(bindings, request);
-    return authRedirect(origin + redirectTo, clearSessionCookie(), clearTransactionCookie());
+    return authRedirect(origin + redirectTo, clearSessionCookie(), clearTransactionCookie(), clearEmailCookie());
   } catch {
     return authError(503, "暂时无法退出，请重试。");
   }

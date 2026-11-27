@@ -1,34 +1,38 @@
 import { createRemoteJWKSet, customFetch, jwtVerify } from "jose";
 
 export type OidcBindings = {
-  AUTHING_ISSUER?: string;
-  AUTHING_CLIENT_ID?: string;
-  AUTHING_CLIENT_SECRET?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
+  RESEND_API_KEY?: string;
+  AUTH_EMAIL_FROM?: string;
   SITE_AUTH_ORIGIN?: string;
-  AUTHING_GOOGLE_CONNECTION_ID?: string;
-  AUTHING_WECHAT_CONNECTION_ID?: string;
 };
 
 export type AuthBindings = OidcBindings & { DB?: D1Database };
-export type LoginMethod = "google" | "wechat" | "email" | "phone";
 export type LoginIntent = "login" | "link";
 
+export type OAuthProvider = "google" | "github";
+
 type OidcConfig = {
+  provider: OAuthProvider;
   issuer: string;
   clientId: string;
   clientSecret: string;
   siteOrigin: string;
   redirectUri: string;
-  googleConnectionId?: string;
-  wechatConnectionId?: string;
 };
 
-type Discovery = {
-  authorization: URL;
-  token: URL;
-  jwks: URL;
-  tokenAuthentication: "client_secret_post" | "client_secret_basic";
-};
+const githubIssuer = "https://github.com";
+const githubAuthorization = githubIssuer + "/login/oauth/authorize";
+const githubToken = githubIssuer + "/login/oauth/access_token";
+const githubUser = "https://api.github.com/user";
+
+const googleIssuer = "https://accounts.google.com";
+const googleAuthorization = googleIssuer + "/o/oauth2/v2/auth";
+const googleToken = "https://oauth2.googleapis.com/token";
+const googleJwks = new URL("https://www.googleapis.com/oauth2/v3/certs");
 
 type LoginTransaction = {
   code_verifier: string;
@@ -39,7 +43,7 @@ type LoginTransaction = {
   expires_at: number;
 };
 
-type ExternalIdentity = { issuer: string; subject: string; displayName: string; email: string | null };
+export type ExternalIdentity = { issuer: string; subject: string; displayName: string; email: string | null };
 
 export const sessionCookieName = "__Host-pagewise_session";
 export const transactionCookieName = "__Host-pagewise_oidc";
@@ -66,35 +70,27 @@ function siteOrigin(value: string | undefined): string | undefined {
   if (url?.pathname === "/") return url.origin;
 }
 
-export function oidcConfig(bindings: OidcBindings = {}): OidcConfig | undefined {
-  const issuer = httpsUrl(bindings.AUTHING_ISSUER);
+export function oidcConfig(bindings: OidcBindings = {}, provider: OAuthProvider = "google"): OidcConfig | undefined {
   const origin = siteOrigin(bindings.SITE_AUTH_ORIGIN);
-  const { AUTHING_CLIENT_ID: clientId, AUTHING_CLIENT_SECRET: clientSecret } = bindings;
-  const { AUTHING_GOOGLE_CONNECTION_ID: googleConnectionId,
-    AUTHING_WECHAT_CONNECTION_ID: wechatConnectionId } = bindings;
-  const connectionId = /^[A-Za-z0-9_-]{1,128}$/;
-
-  if (!issuer || issuer.pathname !== "/oidc" ||
-      !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.authing\.(?:cn|co)$/u.test(issuer.hostname) ||
-      !origin || !clientId || !clientSecret ||
-      !/^[\x21-\x7e]{1,512}$/u.test(clientId) ||
-      !/^[\x21-\x7e]{1,512}$/u.test(clientSecret) ||
-      (googleConnectionId && !connectionId.test(googleConnectionId)) ||
-      (wechatConnectionId && !connectionId.test(wechatConnectionId))) return;
+  const google = provider === "google";
+  const clientId = google ? bindings.GOOGLE_CLIENT_ID : bindings.GITHUB_CLIENT_ID;
+  const clientSecret = google ? bindings.GOOGLE_CLIENT_SECRET : bindings.GITHUB_CLIENT_SECRET;
+  const clientPattern = google ? /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/ : /^[A-Za-z0-9_]{1,128}$/;
+  if (!origin || !clientId || !clientSecret || !clientPattern.test(clientId) ||
+      !/^[\x21-\x7e]{1,512}$/u.test(clientSecret)) return;
 
   return {
-    issuer: issuer.href,
+    provider,
+    issuer: google ? googleIssuer : githubIssuer,
     clientId,
     clientSecret,
     siteOrigin: origin,
-    redirectUri: origin + "/api/auth/callback",
-    googleConnectionId,
-    wechatConnectionId,
+    redirectUri: origin + (google ? "/api/auth/callback" : "/api/auth/callback/github"),
   };
 }
 
-export function externalLoginReady(bindings?: OidcBindings): boolean {
-  return Boolean(oidcConfig(bindings));
+export function transactionMatchesProvider(config: OidcConfig, transaction: LoginTransaction): boolean {
+  return config.provider === "github" ? transaction.nonce === "github" : opaqueToken.test(transaction.nonce);
 }
 
 export function authRequestOrigin(bindings: OidcBindings, request: Request): string | undefined {
@@ -125,16 +121,6 @@ export function safeAuthReturnTo(value: string | null): string {
   return "/" + (query.size ? "?" + query : "") + url.hash;
 }
 
-export function loginMethod(value: string | null): LoginMethod | undefined {
-  switch (value) {
-    case "google":
-    case "wechat":
-    case "email":
-    case "phone":
-      return value;
-  }
-}
-
 export function randomToken(): string {
   return base64url(crypto.getRandomValues(new Uint8Array(32)));
 }
@@ -151,7 +137,7 @@ export async function hashSession(value: string): Promise<string> {
   return Array.from(await sha256(value), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function readCookie(request: Request, name: string): string | undefined {
+export function readCookie(request: Request, name: string): string | undefined {
   const matches = request.headers.get("Cookie")?.split(";").map(cookie => cookie.trim())
     .filter(cookie => cookie.startsWith(name + "=")) ?? [];
   if (matches.length !== 1) return;
@@ -159,7 +145,7 @@ function readCookie(request: Request, name: string): string | undefined {
   if (opaqueToken.test(token)) return token;
 }
 
-function authCookie(name: string, token: string, maxAge: number): string {
+export function authCookie(name: string, token: string, maxAge: number): string {
   return `${name}=${token}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;
 }
 
@@ -173,14 +159,6 @@ export function authHeaders(): Headers {
   });
 }
 
-function endpoint(value: unknown, issuer: string): URL {
-  const url = typeof value === "string" ? httpsUrl(value) : undefined;
-  if (!url || url.origin !== new URL(issuer).origin || !url.pathname.startsWith("/oidc/")) {
-    throw new Error("Invalid Authing endpoint");
-  }
-  return url;
-}
-
 async function requestJson(url: string | URL, init: RequestInit = {}): Promise<Record<string, unknown>> {
   const response = await fetch(url, {
     ...init,
@@ -188,52 +166,25 @@ async function requestJson(url: string | URL, init: RequestInit = {}): Promise<R
     cache: "no-store",
     signal: AbortSignal.timeout(requestTimeoutMs),
   });
-  if (!response.ok) throw new Error("Authing request failed");
+  if (!response.ok) throw new Error("OAuth request failed");
   const value: unknown = await response.json();
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid Authing response");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid OAuth response");
   return value as Record<string, unknown>;
-}
-
-async function discover(config: OidcConfig): Promise<Discovery> {
-  const metadata = await requestJson(config.issuer + "/.well-known/openid-configuration", {
-    headers: { Accept: "application/json" },
-  });
-  if (metadata.issuer !== config.issuer ||
-      !Array.isArray(metadata.code_challenge_methods_supported) ||
-      !metadata.code_challenge_methods_supported.includes("S256") ||
-      !Array.isArray(metadata.id_token_signing_alg_values_supported) ||
-      !metadata.id_token_signing_alg_values_supported.includes("RS256")) {
-    throw new Error("Authing does not advertise the required OIDC configuration");
-  }
-
-  const authMethods = metadata.token_endpoint_auth_methods_supported;
-  const tokenAuthentication = Array.isArray(authMethods) && authMethods.includes("client_secret_post")
-    ? "client_secret_post"
-    : "client_secret_basic";
-  if (authMethods !== undefined &&
-      (!Array.isArray(authMethods) || !authMethods.includes(tokenAuthentication))) {
-    throw new Error("Authing token endpoint requires unsupported client authentication");
-  }
-
-  return {
-    authorization: endpoint(metadata.authorization_endpoint, config.issuer),
-    token: endpoint(metadata.token_endpoint, config.issuer),
-    jwks: endpoint(metadata.jwks_uri, config.issuer),
-    tokenAuthentication,
-  };
 }
 
 export async function startExternalLogin(
   db: D1Database,
   config: OidcConfig,
   request: Request,
-  options: { intent: LoginIntent; method?: LoginMethod; legacyOwner?: string; returnTo: string },
+  options: { intent: LoginIntent; legacyOwner?: string; returnTo: string },
 ): Promise<{ location: string; cookie: string }> {
-  const { authorization } = await discover(config);
-  const { intent, method, legacyOwner, returnTo } = options;
+  const google = config.provider === "google";
+  const authorization = new URL(google ? googleAuthorization : githubAuthorization);
+  const { intent, legacyOwner, returnTo } = options;
   const state = randomToken();
   const browser = randomToken();
-  const nonce = randomToken();
+  // GitHub has no ID token nonce. Store the provider marker in that transaction field.
+  const nonce = google ? randomToken() : "github";
   const codeVerifier = randomToken();
   const previousBrowser = readCookie(request, transactionCookieName);
   const [stateHash, browserHash, challenge, previousBrowserHash] = await Promise.all([
@@ -258,19 +209,17 @@ export async function startExternalLogin(
     client_id: config.clientId,
     redirect_uri: config.redirectUri,
     response_type: "code",
-    response_mode: "query",
-    scope: "openid profile email",
     state,
-    nonce,
     code_challenge: challenge,
     code_challenge_method: "S256",
-    prompt: "login",
+    prompt: "select_account",
   }).toString();
-  if (intent === "link") authorization.searchParams.set("max_age", "0");
-  const connectionId = method === "google" ? config.googleConnectionId
-    : method === "wechat" ? config.wechatConnectionId : undefined;
-  if (connectionId) authorization.searchParams.set("ext_idp_conn_id", connectionId);
-
+  if (google) {
+    authorization.searchParams.set("scope", "openid profile email");
+    authorization.searchParams.set("nonce", nonce);
+  } else {
+    authorization.searchParams.set("scope", "");
+  }
   return { location: authorization.href, cookie: authCookie(transactionCookieName, browser, transactionSeconds) };
 }
 
@@ -293,33 +242,49 @@ export async function exchangeExternalCode(
   code: string,
   transaction: LoginTransaction,
 ): Promise<ExternalIdentity> {
-  const { token, jwks, tokenAuthentication } = await discover(config);
   const form = new URLSearchParams({
     grant_type: "authorization_code",
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
     code,
     redirect_uri: config.redirectUri,
     code_verifier: transaction.code_verifier,
   });
   const headers = new Headers({ Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" });
-  if (tokenAuthentication === "client_secret_post") {
-    form.set("client_id", config.clientId);
-    form.set("client_secret", config.clientSecret);
-  } else {
-    const formEncode = (value: string) => new URLSearchParams({ v: value }).toString().slice(2);
-    headers.set("Authorization", "Basic " + btoa(formEncode(config.clientId) + ":" + formEncode(config.clientSecret)));
+  if (!transactionMatchesProvider(config, transaction)) throw new Error("OAuth provider mismatch");
+
+  const github = config.provider === "github";
+  const tokens = await requestJson(github ? githubToken : googleToken, {
+    method: "POST", headers, body: form.toString(),
+  });
+  if (github) {
+    if (typeof tokens.access_token !== "string" || !/^[A-Za-z0-9_]{1,512}$/.test(tokens.access_token)) {
+      throw new Error("Invalid GitHub access token");
+    }
+    const user = await requestJson(githubUser, { headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: "Bearer " + tokens.access_token,
+      "User-Agent": "Pagewise",
+    } });
+    if (typeof user.id !== "number" || !Number.isSafeInteger(user.id) || user.id <= 0) {
+      throw new Error("Invalid GitHub user ID");
+    }
+    return {
+      issuer: config.issuer, subject: String(user.id),
+      displayName: profileName(user.name) || profileName(user.login) || "页边账号", email: null,
+    };
   }
-  const tokens = await requestJson(token, { method: "POST", headers, body: form.toString() });
   if (typeof tokens.id_token !== "string" || tokens.id_token.length > 16_384) {
-    throw new Error("Authing did not return a valid ID token");
+    throw new Error("Google did not return a valid ID token");
   }
 
-  const keys = createRemoteJWKSet(jwks, {
+  const keys = createRemoteJWKSet(googleJwks, {
     timeoutDuration: requestTimeoutMs,
     [customFetch]: (url, init) => fetch(url, { ...init, redirect: "manual", cache: "no-store" }),
   });
   const { payload } = await jwtVerify(tokens.id_token, keys, {
     algorithms: ["RS256"],
-    issuer: config.issuer,
+    issuer: [config.issuer, "accounts.google.com"],
     audience: config.clientId,
     requiredClaims: ["exp", "iat", "sub", "nonce"],
     maxTokenAge: transactionSeconds,
@@ -330,24 +295,18 @@ export async function exchangeExternalCode(
       (Array.isArray(payload.aud) && payload.aud.length !== 1) ||
       (payload.azp !== undefined && payload.azp !== config.clientId) ||
       !payload.sub || !/^[\x21-\x7e]{1,255}$/u.test(payload.sub)) {
-    throw new Error("Authing ID token claims do not match the login transaction");
+    throw new Error("Google ID token claims do not match the login transaction");
   }
 
-  if (transaction.intent === "link") {
-    const earliest = transaction.expires_at / 1000 - transactionSeconds - clockSkewSeconds;
-    const latest = Date.now() / 1000 + clockSkewSeconds;
-    if (typeof payload.auth_time !== "number" || !Number.isInteger(payload.auth_time) ||
-        payload.auth_time < earliest || payload.auth_time > latest) {
-      throw new Error("Authing did not freshly authenticate the account being linked");
-    }
-  }
-
-  const displayName = typeof payload.name === "string"
-    ? payload.name.replace(/[\p{Cc}\p{Cf}]/gu, "").trim().slice(0, 100) : "";
+  const displayName = profileName(payload.name);
   const email = payload.email_verified === true && typeof payload.email === "string" &&
     payload.email.length <= 254 && /^[^@\s]+@[^@\s]+$/u.test(payload.email) &&
     !/[\p{Cc}\p{Cf}]/u.test(payload.email) ? payload.email : null;
   return { issuer: config.issuer, subject: payload.sub, displayName: displayName || "页边账号", email };
+}
+
+function profileName(value: unknown): string {
+  return typeof value === "string" ? value.replace(/[\p{Cc}\p{Cf}]/gu, "").trim().slice(0, 100) : "";
 }
 
 export async function externalSessionOwner(db: D1Database, request: Request): Promise<string | undefined> {
@@ -390,7 +349,7 @@ export async function createExternalSession(
     previousToken ? hashSession(previousToken) : null,
   ]);
   const now = Date.now();
-  const newOwner = "authing:" + crypto.randomUUID();
+  const newOwner = "account:" + crypto.randomUUID();
 
   // D1 executes the batch atomically. An existing subject keeps its original owner.
   const [, , session] = await db.batch<{ owner: string }>([

@@ -9,7 +9,7 @@
     "predev": "node scripts/reader-assets.mjs",
     "prebuild": "node scripts/reader-assets.mjs",
     "dev:key": "node scripts/reader-assets.mjs && node scripts/local-with-key.mjs",
-    "test": "node --experimental-strip-types --test tests/*.test.mjs components/reader-geometry.test.mjs",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs components/reader-geometry.test.mjs app/api/auth/oidc.test.mjs",
     "install:ci": "node scripts/install-ci.mjs",
     "dev": "node scripts/run-framework.mjs dev",
     "build": "node scripts/run-framework.mjs build",
