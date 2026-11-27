@@ -27,3 +27,26 @@ export function scrollTopFor(boxes: PageBox[], page: number, fraction = 0): numb
   const span = Math.max(1, boxes[index].height || gap);
   return start + Math.max(0, Math.min(1, fraction)) * span;
 }
+
+// Progress uses zero-based page units. Include the leading desk and page gaps
+// in the scroll spans so moving through them also advances the slider.
+export function pageProgressAt(boxes: PageBox[], scrollTop: number): number {
+  if (!boxes.length) return 0;
+  const top = Number.isFinite(scrollTop) ? scrollTop : 0;
+  const { anchorPage } = locateAnchor(boxes, top);
+  const index = anchorPage - 1;
+  const start = index === 0 ? 0 : boxes[index].top;
+  const end = boxes[index + 1]?.top ?? boxes[index].top + boxes[index].height;
+  const span = Math.max(1, end - start);
+  return index + Math.max(0, Math.min(1, (top - start) / span));
+}
+
+export function scrollTopForProgress(boxes: PageBox[], progress: number): number {
+  if (!boxes.length) return 0;
+  const value = Number.isFinite(progress) ? progress : 0;
+  const index = Math.max(0, Math.min(boxes.length - 1, Math.floor(value)));
+  const start = index === 0 ? 0 : boxes[index].top;
+  const end = boxes[index + 1]?.top ?? boxes[index].top + boxes[index].height;
+  const span = Math.max(1, end - start);
+  return start + Math.max(0, Math.min(1, value - index)) * span;
+}

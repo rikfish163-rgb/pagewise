@@ -4,7 +4,7 @@ import { useLocale } from './LocaleProvider';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AlignLeft, ChevronLeft, ChevronRight, Scan, TextSelect, ZoomIn, ZoomOut } from 'lucide-react';
 import { normalizedRect, pixelRect, pageWithin, type Rect } from './reader-geometry';
-import { locateAnchor, scrollTopFor, type PageBox } from './reading-position';
+import { locateAnchor, pageProgressAt, scrollTopFor, scrollTopForProgress, type PageBox } from './reading-position';
 import { annotationsVisible, pageRenderState } from './reader-page-state';
 import { snapTextSelection, textMarginCaret, type TextCaret } from './reader-selection';
 import { isSparseText, layoutPdfText, type PdfTextItem } from './reader-text';
@@ -96,6 +96,9 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
   useEffect(()=>()=>{if(feedbackTimer.current!==null)window.clearTimeout(feedbackTimer.current);},[]);
   const [revision,setRevision] = useState(0);
   const [textReading,setTextReading]=useState(false);
+  const [progress,setProgress]=useState({value:0,max:0});
+  const textMode=textReading&&!!pdf&&kind==='pdf';
+  const scrollDriven=layout==='continuous'&&!textMode;
   const [restoreToken,setRestoreToken]=useState(0);
   const pendingRestore=useRef<ReaderLocation|null>(null);
   const zoomAnchor=useRef<{anchorPage:number;fraction:number}|null>(null);
@@ -117,12 +120,22 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
     observer.current=null;
   }
 
+  const updateProgress=useCallback((reader:HTMLDivElement,pages:HTMLDivElement)=>{
+    const boxes=pageBoxes(reader,pages);
+    // The viewport can already show the end of the last page. Measure the
+    // reachable end so the slider still reaches its endpoint there.
+    const max=pageProgressAt(boxes,Math.max(0,reader.scrollHeight-reader.clientHeight));
+    const value=Math.min(max,pageProgressAt(boxes,reader.scrollTop));
+    setProgress(previous=>previous.value===value&&previous.max===max?previous:{value,max});
+  },[]);
+
   const alignTo=useCallback((reader:HTMLDivElement,pages:HTMLDivElement,targetPage:number,fraction=0)=>{
     const boxes=pageBoxes(reader,pages);
     if(!boxes.length)return;
     reader.scrollTop=scrollTopFor(boxes,pageWithin(targetPage,count||boxes.length),fraction);
     programmaticScroll.current=reader.scrollTop;
-  },[count]);
+    updateProgress(reader,pages);
+  },[count,updateProgress]);
 
   const startRestoring=useCallback((position:{anchorPage:number;fraction:number},reader:HTMLDivElement,pages:HTMLDivElement)=>{
     const anchorPage=pageWithin(position.anchorPage,count||1);
@@ -149,7 +162,8 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
 
   function readScroll(){
     const reader=scroll.current,pages=stack.current;
-    if(layout==='single'||!reader||!pages||!count||pages.children.length!==count)return;
+    if(!scrollDriven||!reader||!pages||!count||pages.children.length!==count)return;
+    updateProgress(reader,pages);
     const programmatic=programmaticScroll.current;
     if(programmatic!==null&&Math.abs(reader.scrollTop-programmatic)<0.5)return;
     // A scroll produced by page shells changing height must not disconnect the
@@ -185,6 +199,18 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
     if(textReading)scroll.current?.scrollTo({top:0});
     reported.current=next;
     onPage(next);
+  }
+
+  function goToProgress(next:number){
+    const reader=scroll.current,pages=stack.current;
+    if(!reader||!pages||!count||pages.children.length!==count)return;
+    stopRestoring();
+    reader.scrollTop=Math.min(
+      Math.max(0,reader.scrollHeight-reader.clientHeight),
+      scrollTopForProgress(pageBoxes(reader,pages),next),
+    );
+    programmaticScroll.current=null;
+    readScroll();
   }
 
   function chooseThumbnail(event:React.MouseEvent<HTMLButtonElement>){
@@ -285,7 +311,7 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
     let stopped = false; const abort = new AbortController(); let document: PdfDocument|undefined;
     // The external document changes here; reset its asynchronous loading state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setBusy(true); setError(''); setCount(0); setPdf(null); setDeck(null); reported.current=0;
+    setBusy(true); setError(''); setCount(0); setPdf(null); setDeck(null); setProgress({value:0,max:0}); reported.current=0;
     setPageRatio(kind==='pdf'?1/Math.SQRT2:16/9);
     (async () => {
       const response = await fetch(url,{signal:abort.signal});
@@ -390,7 +416,6 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
 
   const visiblePages=layout==='single'?[current]:Array.from({length:count},(_,index)=>index+1);
   const thumbnailPages=Array.from({length:count},(_,index)=>index+1).slice(Math.max(0,current-3),Math.min(count,current+2));
-  const textMode=textReading&&!!pdf&&kind==='pdf';
 
   // Give the document enough trailing desk that the last pages can still be
   // aligned to the top after an explicit jump, instead of stopping short.
@@ -404,13 +429,14 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
       const needed=Math.max(0,Math.round(reader.clientHeight-last.getBoundingClientRect().height));
       const value=needed?`${needed}px`:'';
       if(pages.style.paddingBottom!==value)pages.style.paddingBottom=value;
+      updateProgress(reader,pages);
     };
     sync();
     const observer=new ResizeObserver(sync);
     observer.observe(reader);
     observer.observe(pages);
     return ()=>observer.disconnect();
-  },[layout,count,textMode,zoom]);
+  },[layout,count,textMode,zoom,updateProgress]);
   useLayoutEffect(()=>{
     const tools=selectionTools.current;
     const viewport=scroll.current;
@@ -492,7 +518,17 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
     </div>
     {count>0&&<div className="reader-pagination">
       <span aria-hidden="true">1</span>
-      <input type="range" aria-label={t("拖动跳页")} aria-valuetext={t("第 {0} 页，共 {1} 页", { 0: current, 1: count })} min={1} max={count} step={1} value={current} disabled={count===1} onChange={e=>goToPage(e.currentTarget.valueAsNumber)}/>
+      <input
+        type="range"
+        aria-label={t(scrollDriven?"拖动阅读进度":"拖动跳页")}
+        aria-valuetext={t("第 {0} 页，共 {1} 页", { 0: current, 1: count })}
+        min={scrollDriven?0:1}
+        max={scrollDriven?progress.max:count}
+        step={scrollDriven?"any":1}
+        value={scrollDriven?progress.value:current}
+        disabled={scrollDriven?progress.max===0:count===1}
+        onChange={event=>scrollDriven?goToProgress(event.currentTarget.valueAsNumber):goToPage(event.currentTarget.valueAsNumber)}
+      />
       <span aria-hidden="true">{count}</span>
     </div>}
     <p className="reader-hint">{textMode?t("文字阅读来自 PDF 文本层，查看原文图像可回到版式与图表。"):mode==='crop'?t("拖动框选图表，按 Esc 取消选区。"):t("划选文字开始讨论，按 Esc 取消选区。")}{kind==='pptx'?t(" PPTX 为静态预览，复杂版式建议使用 PDF。"):''}</p>

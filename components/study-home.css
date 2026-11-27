@@ -554,6 +554,9 @@
   box-shadow: var(--shadow-1);
   transform: translateY(-1px);
 }
+.study-home .sh-material-row:has(> .sh-project-menu[open]) {
+  z-index: 7;
+}
 .study-home .sh-document {
   display: flex;
   align-items: center;

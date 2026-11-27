@@ -279,6 +279,7 @@ export const englishMessages: Readonly<Record<string, string>> = {
   "讲义页面": "Document pages",
   "正在解析文档…": "Preparing document…",
   "拖动跳页": "Drag to change pages",
+  "拖动阅读进度": "Drag to change reading position",
   "第 {0} 页，共 {1} 页": "Page {0} of {1}",
   "文字阅读来自 PDF 文本层，查看原文图像可回到版式与图表。": "Text view uses the PDF text layer. Open the original page to view its layout and figures.",
   "拖动框选图表，按 Esc 取消选区。": "Drag to select a figure. Press Esc to cancel.",

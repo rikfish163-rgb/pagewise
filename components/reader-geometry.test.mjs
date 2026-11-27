@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { nearestTextRun, normalizedRect, pixelRect, pageWithin } from './reader-geometry.ts';
-import { locateAnchor, scrollTopFor } from './reading-position.ts';
+import { locateAnchor, pageProgressAt, scrollTopFor, scrollTopForProgress } from './reading-position.ts';
 import { isSparseText, layoutPdfText } from './reader-text.ts';
 import { annotationsVisible, pageRenderState } from './reader-page-state.ts';
 
@@ -58,6 +58,72 @@ test('anchor position clamps at the document edges and is not stale progress', (
   assert.equal(scrollTopFor(boxes, 2, 0.25), 1000);
   assert.equal(scrollTopFor(boxes, 9, 0.5), 1200);
   assert.equal(scrollTopFor([], 3, 0.5), 0);
+});
+
+test('reading progress advances within pages and through leading and inter-page gaps', () => {
+  const boxes = [
+    { top: 24, height: 1000 },
+    { top: 1244, height: 600 },
+    { top: 2064, height: 1200 },
+  ];
+  assert.equal(pageProgressAt(boxes, 0), 0);
+  assert.equal(pageProgressAt(boxes, 12), 12 / 1244);
+  assert.equal(pageProgressAt(boxes, 524), 524 / 1244);
+  assert.ok(pageProgressAt(boxes, 548) > pageProgressAt(boxes, 524));
+  assert.ok(pageProgressAt(boxes, 1200) > pageProgressAt(boxes, 1100));
+  assert.ok(pageProgressAt(boxes, 1243) < 1);
+  assert.equal(pageProgressAt(boxes, 1244), 1);
+  assert.equal(pageProgressAt(boxes, 1654), 1.5);
+  assert.equal(pageProgressAt(boxes, 2064), 2);
+  assert.equal(pageProgressAt(boxes, 2664), 2.5);
+});
+
+test('fractional progress maps back to the same height with different page sizes', () => {
+  const boxes = [
+    { top: 24, height: 1000 },
+    { top: 1244, height: 600 },
+    { top: 2064, height: 1200 },
+  ];
+  for (const top of [0, 12, 524, 1100, 1200, 1243, 1244, 1654, 2064, 2664, 3264]) {
+    assert.ok(Math.abs(scrollTopForProgress(boxes, pageProgressAt(boxes, top)) - top) < 0.000001);
+  }
+  assert.equal(scrollTopForProgress(boxes, 1.5), 1654);
+  assert.equal(scrollTopForProgress(boxes, 2.25), 2364);
+});
+
+test('reading progress uses the reachable end even when the last page is already visible', () => {
+  const boxes = [
+    { top: 24, height: 1000 },
+    { top: 1244, height: 600 },
+    { top: 2064, height: 1200 },
+  ];
+  const scrollEnd = 2500;
+  const maximum = pageProgressAt(boxes, scrollEnd);
+  assert.ok(maximum > 2 && maximum < 3);
+  assert.equal(scrollTopForProgress(boxes, maximum), scrollEnd);
+  assert.ok(pageProgressAt(boxes, scrollEnd - 24) < maximum);
+});
+
+test('scrollable one-page documents support fractional progress and resized page geometry', () => {
+  const original = [{ top: 24, height: 1600 }];
+  const resized = [{ top: 24, height: 2400 }];
+  const value = pageProgressAt(original, 524);
+  assert.equal(value, 524 / 1624);
+  assert.equal(scrollTopForProgress(original, value), 524);
+  assert.equal(scrollTopForProgress(resized, value), value * 2424);
+  assert.equal(pageProgressAt(original, 0), 0);
+});
+
+test('reading progress bounds empty documents and values outside the document', () => {
+  const boxes = [{ top: 24, height: 800 }, { top: 844, height: 1200 }];
+  assert.equal(pageProgressAt([], 50), 0);
+  assert.equal(scrollTopForProgress([], 1.5), 0);
+  assert.equal(pageProgressAt(boxes, -50), 0);
+  assert.equal(pageProgressAt(boxes, 5000), 2);
+  assert.equal(pageProgressAt(boxes, NaN), 0);
+  assert.equal(scrollTopForProgress(boxes, -1), 0);
+  assert.equal(scrollTopForProgress(boxes, 5), 2044);
+  assert.equal(scrollTopForProgress(boxes, NaN), 0);
 });
 
 const item = (str, y, x = 0, size = 12) => ({ str, transform: [size, 0, 0, size, x, y], width: str.length * size * 0.5 });
