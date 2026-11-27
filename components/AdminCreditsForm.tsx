@@ -1,3 +1,4 @@
+import { useLocale } from './LocaleProvider';
 import { useState, type FormEvent } from 'react';
 import { parseAdminCreditsDelta } from './AdminCreditsAmount';
 
@@ -9,6 +10,7 @@ export function AdminCreditsForm({
   disabled: boolean;
   onReview: (draft: AdjustmentDraft) => void;
 }) {
+  const { t } = useLocale();
   const [error, setError] = useState('');
 
   function review(event: FormEvent<HTMLFormElement>) {
@@ -33,23 +35,23 @@ export function AdminCreditsForm({
   return (
     <form className="admin-credits-form" onSubmit={review}>
       <label>
-        <span>变动积分</span>
+        <span>{t("变动积分")}</span>
         <input
           className="admin-credits-input"
           name="delta"
           type="text"
-          placeholder="+10 或 -2.5"
+          placeholder={t("+10 或 -2.5")}
           maxLength={32}
           disabled={disabled}
           required
         />
       </label>
       <label>
-        <span>调整原因</span>
+        <span>{t("调整原因")}</span>
         <textarea className="admin-credits-input" name="reason" rows={2} maxLength={500} disabled={disabled} required />
       </label>
       {error && <p className="admin-credits-error" role="alert">{error}</p>}
-      <button className="admin-credits-button" type="submit" disabled={disabled}>核对调整</button>
+      <button className="admin-credits-button" type="submit" disabled={disabled}>{t("核对调整")}</button>
     </form>
   );
 }

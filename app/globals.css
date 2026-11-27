@@ -4,8 +4,8 @@
   --diff-removed: #ff5f38;
   --skill: #cc7d5e;
   --wenkai: "Pagewise WenKai", "WenKai Common", "WenKai Extended", "Kaiti SC", KaiTi, STKaiti;
-  --font-display: "Pagewise WenKai", "LXGW WenKai", "Kaiti SC", KaiTi, serif;
-  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-display: "Inter", "Pagewise WenKai", "LXGW WenKai", "Kaiti SC", KaiTi, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --font-serif: var(--font-display), "Source Serif 4", serif;
   --font-code: "JetBrains Mono", ui-monospace, monospace;
   --foreground: var(--ink);
@@ -152,6 +152,9 @@ body {
   font-weight: 400;
   line-height: 1.7;
   font-optical-sizing: auto;
+}
+html:lang(en) :is(h1, h2) {
+  font-weight: 700;
 }
 :is(h1, h2, h3) {
   text-wrap: balance;

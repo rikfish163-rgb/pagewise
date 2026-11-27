@@ -1,5 +1,6 @@
 'use client';
 
+import { useLocale } from './LocaleProvider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DEFAULT_TUTOR_MODEL, DEFAULT_REASONING_EFFORT, TUTOR_MODELS, reconcileTutorSettings, resolveTutorSettings, type TutorSettings, type ReasoningEffort, type TutorSpeed, type TutorModel, type TutorModelDiscovery } from '@/lib/tutor-models';
 import './tutor-controls.css';
@@ -65,6 +66,7 @@ export function useTutorSettings(){
 }
 
 export function TutorControls({value,onChange,availability}:{value:TutorSettings;onChange:(s:TutorSettings)=>void;availability:TutorAvailability}){
+  const { t } = useLocale();
   const options=useRef<HTMLDetailsElement>(null);
   useEffect(()=>{
     function closeOutside(event:PointerEvent){
@@ -77,24 +79,24 @@ export function TutorControls({value,onChange,availability}:{value:TutorSettings
   const models=availability.models;
   const selected=models.find(m=>m.id===value.model);
   const disabled=!availability.ready;
-  return <div className="tutor-controls" role="group" aria-label="下次提问设置">
-    <label className="tutor-model"><span>模型{availability.status==='unavailable'?' · 待核实':''}</span><select aria-label="模型" disabled={disabled} value={selected?value.model:''} title={selected?.description} onChange={e=>{
+  return <div className="tutor-controls" role="group" aria-label={t("下次提问设置")}>
+    <label className="tutor-model"><span>{t("模型{0}", { 0: availability.status==='unavailable'?t(' · 待核实'):'' })}</span><select aria-label={t("模型")} disabled={disabled} value={selected?value.model:''} title={selected?.description ? t(selected.description) : undefined} onChange={e=>{
       const next=reconcileTutorSettings({...value,model:e.target.value},models);if(next)onChange(next);
     }}>
-      {!selected&&<option value="">{availability.status==='loading'?'查询中…':'暂无可用模型'}</option>}
-      {models.map(m=><option key={m.id} value={m.id}>{m.label}{m.deprecated?'（已弃用）':''}</option>)}
+      {!selected&&<option value="">{availability.status==='loading'?t("查询中…"):t("暂无可用模型")}</option>}
+      {models.map(m=><option key={m.id} value={m.id}>{m.label}{m.deprecated?t("（已弃用）"):''}</option>)}
     </select></label>
     <details ref={options} className="tutor-options" onKeyDown={event=>{if(event.key==='Escape'&&event.currentTarget.open){event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}>
-    <summary>设置</summary><div>
-    <label className="tutor-effort"><span>思考强度</span><select aria-label="思考强度" disabled={disabled||!selected} value={selected?value.reasoningEffort:''} onChange={e=>onChange({...value,reasoningEffort:e.target.value as ReasoningEffort})}>
+    <summary>{t("设置")}</summary><div>
+    <label className="tutor-effort"><span>{t("思考强度")}</span><select aria-label={t("思考强度")} disabled={disabled||!selected} value={selected?value.reasoningEffort:''} onChange={e=>onChange({...value,reasoningEffort:e.target.value as ReasoningEffort})}>
       {!selected&&<option value="">—</option>}
-      {selected?.reasoningEfforts.map(e=><option key={e} value={e}>{labels[e]}</option>)}
+      {selected?.reasoningEfforts.map(e=><option key={e} value={e}>{t(labels[e])}</option>)}
     </select></label>
-    <label className="tutor-speed"><span>速度</span><select aria-label="速度" disabled={disabled||!selected} value={selected?(value.speed??'auto'):''} title={value.speed==='fast'||value.speed==='ultrafast'?'该档按 API 加价计费，实际档位以回复为准。':undefined} onChange={e=>onChange({...value,speed:e.target.value as TutorSpeed})}>
+    <label className="tutor-speed"><span>{t("速度")}</span><select aria-label={t("速度")} disabled={disabled||!selected} value={selected?(value.speed??'auto'):''} title={value.speed==='fast'||value.speed==='ultrafast'?t("该档按 API 加价计费，实际档位以回复为准。"):undefined} onChange={e=>onChange({...value,speed:e.target.value as TutorSpeed})}>
       {!selected&&<option value="">—</option>}
-      {selected?.speeds.map(speed=><option key={speed} value={speed}>{speedLabels[speed]}</option>)}
+      {selected?.speeds.map(speed=><option key={speed} value={speed}>{t(speedLabels[speed])}</option>)}
     </select></label>
     </div></details>
-    {availability.status!=='ready'&&<div className="tutor-model-status" role="status"><span>{availability.message}</span>{availability.status!=='loading'&&<button type="button" onClick={availability.reload}>重查</button>}</div>}
+    {availability.status!=='ready'&&<div className="tutor-model-status" role="status"><span>{t(availability.message)}</span>{availability.status!=='loading'&&<button type="button" onClick={availability.reload}>{t("重查")}</button>}</div>}
   </div>;
 }

@@ -1,3 +1,5 @@
+import { type Locale } from './i18n.ts';
+
 import type {MemorySourceRef} from './learning-memory';
 import type { TutorProcessing } from './tutor-models';
 export type Selection = { page: number; text?: string; image?: string; rect?: number[] };
@@ -25,9 +27,9 @@ export function selectionLabel(selection:Selection):string {
   return selection.text?.trim() || (selection.image ? `第 ${selection.page} 页 · 框选区域` : `第 ${selection.page} 页 · 自由提问`);
 }
 
-export function questionTime(timestamp?: number): string {
+export function questionTime(timestamp?: number, locale: Locale = 'zh-CN'): string {
   return timestamp && Number.isFinite(timestamp)
-    ? new Intl.DateTimeFormat('zh-CN', {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit', hourCycle:'h23'}).format(timestamp)
+    ? new Intl.DateTimeFormat(locale, {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit', hourCycle:'h23'}).format(timestamp)
     : '';
 }
 
@@ -56,9 +58,9 @@ export function discussionTopic(discussion: Discussion): string {
     || '未发送的问题';
 }
 
-export function discussionTitle(discussion: Discussion): string {
+export function discussionTitle(discussion: Discussion, locale: Locale = 'zh-CN'): string {
   const latestQuestion = discussion.messages.findLast(message => message.role === 'user');
-  const time = questionTime(latestQuestion?.createdAt ?? discussion.createdAt);
+  const time = questionTime(latestQuestion?.createdAt ?? discussion.createdAt, locale);
   const title = discussionTopic(discussion);
   return time ? `${time} · ${title}` : title;
 }

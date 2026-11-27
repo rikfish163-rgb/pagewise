@@ -1,29 +1,15 @@
-import {
-  ArrowRight,
-  BookOpen,
-  CircleUserRound,
-  Globe,
-  LockKeyhole,
-  Mail,
-  QrCode,
-  Smartphone,
-} from "lucide-react";
-import type { Metadata } from "next";
-import Link from "next/link";
-import { chatGPTSignInPath } from "@/app/chatgpt-auth";
-import { externalLoginReady, getSiteAccount } from "@/app/site-account";
-import styles from "./login.module.css";
+import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
+import { chatGPTSignInPath } from '@/app/chatgpt-auth';
+import { externalLoginReady, getSiteAccount } from '@/app/site-account';
+import LoginScreen from '@/components/LoginScreen';
+import { localeCookieName, resolveLocale, translate } from '@/lib/i18n';
 
-export const dynamic = "force-dynamic";
-
-export const metadata: Metadata = { title: "登录 · 页边" };
-
-const loginMethods = [
-  { method: "google", label: "Google", Icon: Globe },
-  { method: "wechat", label: "微信扫码", Icon: QrCode },
-  { method: "email", label: "邮箱验证码", Icon: Mail },
-  { method: "phone", label: "短信验证码", Icon: Smartphone },
-];
+export const dynamic = 'force-dynamic';
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = resolveLocale((await cookies()).get(localeCookieName)?.value);
+  return { title: translate(locale, '登录 · 页边') };
+}
 
 const authMessages = new Map([
   ["cancelled", "验证已取消。你可以重新选择登录方式。"],
@@ -68,97 +54,14 @@ export default async function LoginPage({
   const linked = status === "linked";
   const message = linked && account?.source !== "chatgpt" ? undefined : authMessages.get(status);
 
-  return (
-    <div className={styles.shell}>
-      <aside className={styles.sidebar}>
-        <Link className={styles.brand} href="/" aria-label="页边首页">
-          <span className={styles.brandMark}><BookOpen size={20} aria-hidden="true" /></span>
-          <span>页边</span>
-        </Link>
-        <nav className={styles.nav} aria-label="页边导航">
-          <a className={styles.navItem} href={readerPath}>
-            <BookOpen size={16} aria-hidden="true" /> 我的阅读器
-          </a>
-          <a className={styles.navItem} href={returnQuery ? `/login?${returnQuery}` : "/login"} aria-current="page">
-            <CircleUserRound size={16} aria-hidden="true" /> {account ? "我的账号" : "登录"}
-          </a>
-        </nav>
-      </aside>
-
-      <main className={styles.main}>
-        <div className={styles.content}>
-          <h1>{account ? "我的账号" : "登录页边"}</h1>
-          <p className={styles.intro}>
-            {account ? "你已登录，可以继续阅读。" : "登录或创建账号，进入你的私人阅读器。"}
-          </p>
-          {message && <p className={styles.notice} role={linked ? "status" : "alert"}>{message}</p>}
-          {account ? (
-            <>
-              <section className={styles.panel} aria-label="当前账号">
-                <div className={styles.identity}>
-                  <CircleUserRound size={24} aria-hidden="true" />
-                  <div>
-                    <h2>{account.displayName || account.email || "页边账号"}</h2>
-                    {account.email && account.email !== account.displayName && <p>{account.email}</p>}
-                  </div>
-                </div>
-                <a className={styles.primary} href={readerPath}>
-                  继续阅读 <ArrowRight size={16} aria-hidden="true" />
-                </a>
-              </section>
-              {account.source === "chatgpt" && (
-                <section className={styles.secondary} aria-labelledby="link-login-title">
-                  <h2 id="link-login-title">添加登录方式</h2>
-                  <p>
-                    {ready ? "在验证页关联一种新的登录方式，下次仍可进入同一资料库。" : "外部登录服务开通后，即可关联新的登录方式。"}
-                  </p>
-                  <form noValidate method="post" action="/api/auth/login?intent=link">
-                    {returnTo && <input type="hidden" name="return_to" value={returnTo} />}
-                    <button className={styles.secondaryAction} type="submit" disabled={!ready}>
-                      关联外部登录 <ArrowRight size={16} aria-hidden="true" />
-                    </button>
-                  </form>
-                </section>
-              )}
-            </>
-          ) : (
-            <>
-              <section className={styles.panel} aria-labelledby="new-login-title">
-                <h2 id="new-login-title">登录与注册</h2>
-                <p id="login-method-help" className={styles.methodHelp}>
-                  {ready ? "前往 Authing 验证页，选择已开通的方式。首次验证成功即创建账号。" : "以下方式将在认证服务正式开通后提供。"}
-                </p>
-                <div className={styles.methods}>
-                  {loginMethods.map(({ method, label, Icon }) => ready ? (
-                    <a
-                      key={method}
-                      className={styles.method}
-                      href={`/api/auth/login?method=${method}${returnQuery ? `&${returnQuery}` : ""}`}
-                      aria-describedby="login-method-help"
-                    >
-                      <Icon size={18} aria-hidden="true" /> {label}
-                    </a>
-                  ) : (
-                    <button key={method} className={styles.method} type="button" disabled aria-describedby="login-method-help">
-                      <Icon size={18} aria-hidden="true" /> {label}
-                    </button>
-                  ))}
-                </div>
-              </section>
-              <section className={styles.secondary} aria-labelledby="legacy-login-title">
-                <h2 id="legacy-login-title">受邀使用过页边？</h2>
-                <p>用原账号登录，继续访问已有的资料和笔记。</p>
-                <a className={styles.secondaryAction} href={chatGPTSignInPath(readerPath)} target="_top">
-                  使用 ChatGPT 登录 <ArrowRight size={16} aria-hidden="true" />
-                </a>
-              </section>
-              <p className={styles.privacy}>
-                <LockKeyhole size={15} aria-hidden="true" /> 你的资料、笔记和讨论仅限你的账号访问。
-              </p>
-            </>
-          )}
-        </div>
-      </main>
-    </div>
-  );
+  return <LoginScreen
+    account={account ? { displayName: account.displayName, email: account.email, source: account.source } : null}
+    ready={ready}
+    returnTo={returnTo}
+    readerPath={readerPath}
+    returnQuery={returnQuery}
+    message={message}
+    linked={linked}
+    chatgptSignInUrl={chatGPTSignInPath(readerPath)}
+  />;
 }

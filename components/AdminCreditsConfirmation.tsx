@@ -1,5 +1,6 @@
 'use client';
 
+import { useLocale } from './LocaleProvider';
 import { useEffect, useRef } from 'react';
 
 type Props = {
@@ -18,6 +19,7 @@ type Props = {
 export function AdminCreditsConfirmation({
   user, delta, available, balance, reason, saving, error, rejected, onCancel, onConfirm,
 }: Props) {
+  const { t } = useLocale();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
@@ -44,21 +46,21 @@ export function AdminCreditsConfirmation({
         if (!saving) onCancel();
       }}
     >
-      <h2 id="admin-credits-confirm-heading">确认积分调整</h2>
+      <h2 id="admin-credits-confirm-heading">{t("确认积分调整")}</h2>
       <p id="admin-credits-confirm-user" className="admin-credits-status">{user}</p>
       <dl className="admin-credits-summary">
-        <div><dt>变动积分</dt><dd className="admin-credits-amount">{delta}</dd></div>
-        <div><dt>预计可用积分</dt><dd className="admin-credits-amount">{available}</dd></div>
-        <div><dt>预计积分余额</dt><dd className="admin-credits-amount">{balance}</dd></div>
+        <div><dt>{t("变动积分")}</dt><dd className="admin-credits-amount">{delta}</dd></div>
+        <div><dt>{t("预计可用积分")}</dt><dd className="admin-credits-amount">{available}</dd></div>
+        <div><dt>{t("预计积分余额")}</dt><dd className="admin-credits-amount">{balance}</dd></div>
       </dl>
       <dl className="admin-credits-reason">
-        <div><dt className="admin-credits-muted">调整原因</dt><dd>{reason}</dd></div>
+        <div><dt className="admin-credits-muted">{t("调整原因")}</dt><dd>{reason}</dd></div>
       </dl>
       {error && <p className="admin-credits-status admin-credits-error" role="alert">{error}</p>}
       <div className="admin-credits-actions">
-        <button ref={cancelRef} type="button" className="admin-credits-button" disabled={saving} onClick={onCancel}>返回修改</button>
+        <button ref={cancelRef} type="button" className="admin-credits-button" disabled={saving} onClick={onCancel}>{t("返回修改")}</button>
         <button type="button" className="admin-credits-button is-primary" disabled={saving || rejected} onClick={onConfirm}>
-          {saving ? '正在保存…' : '确认调整'}
+          {saving ? t("正在保存…") : t("确认调整")}
         </button>
       </div>
     </dialog>

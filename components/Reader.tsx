@@ -1,5 +1,6 @@
 'use client';
 
+import { useLocale } from './LocaleProvider';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AlignLeft, ChevronLeft, ChevronRight, Scan, TextSelect, ZoomIn, ZoomOut } from 'lucide-react';
 import { normalizedRect, pixelRect, pageWithin, type Rect } from './reader-geometry';
@@ -70,6 +71,7 @@ function pageBoxes(reader: HTMLDivElement, pages: HTMLDivElement): PageBox[] {
 }
 
 export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,page,onPage,onSelect,onCrop,onCropStart,onCropState,onDismiss,onReady,focusRect,focusPage,annotations=[],onOpenAnnotation}: Props) {
+  const { t } = useLocale();
   const [pdf, setPdf] = useState<PdfDocument|null>(null);
   const [deck, setDeck] = useState<Deck|null>(null);
   const [count,setCount] = useState(0), [busy,setBusy] = useState(true), [error,setError] = useState('');
@@ -434,10 +436,10 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
     return ()=>{observer.disconnect();viewport.removeEventListener('scroll',position);};
   },[selectionAction]);
 
-  return <section className="document-reader" aria-label="文档阅读器">
-    {selectionAction&&<div ref={selectionTools} className="reader-selection-actions" role="group" aria-label="选区操作"><span title={selectionAction.text||'已框选图片'}>{selectionAction.text||'图表选区'} · 第 {selectionAction.page} 页</span><button type="button" onClick={()=>{onSelect(selectionAction,'ask');setSelectionAction(null)}}>提问</button><button type="button" onClick={()=>{onSelect(selectionAction,'add');setSelectionAction(null)}}>加入当前问题</button>{selectionAction.text&&<button type="button" onClick={()=>{onSelect(selectionAction,'save');setSelectionAction(null)}}>存为摘录</button>}<button type="button" aria-label="取消选区操作" onClick={()=>setSelectionAction(null)}>取消</button></div>}
+  return <section className="document-reader" aria-label={t("文档阅读器")}>
+    {selectionAction&&<div ref={selectionTools} className="reader-selection-actions" role="group" aria-label={t("选区操作")}><span title={selectionAction.text||t("已框选图片")}>{t("{0} · 第 {1} 页", { 0: selectionAction.text||t('图表选区'), 1: selectionAction.page })}</span><button type="button" onClick={()=>{onSelect(selectionAction,'ask');setSelectionAction(null)}}>{t("提问")}</button><button type="button" onClick={()=>{onSelect(selectionAction,'add');setSelectionAction(null)}}>{t("加入当前问题")}</button>{selectionAction.text&&<button type="button" onClick={()=>{onSelect(selectionAction,'save');setSelectionAction(null)}}>{t("存为摘录")}</button>}<button type="button" aria-label={t("取消选区操作")} onClick={()=>setSelectionAction(null)}>{t("取消")}</button></div>}
     <div className="reader-toolbar">
-      <div className="reader-pager"><button aria-label="上一页" disabled={current<=1 || !count} onClick={()=>goToPage(current-1)}><ChevronLeft size={17}/></button>
+      <div className="reader-pager"><button aria-label={t("上一页")} disabled={current<=1 || !count} onClick={()=>goToPage(current-1)}><ChevronLeft size={17}/></button>
       <form className="reader-jump" onSubmit={e=>{
         e.preventDefault();const input=e.currentTarget.elements.namedItem('page') as HTMLInputElement;
         const raw=input.value.trim();
@@ -445,35 +447,35 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
         const target=pageWithin(Number(raw),count);
         input.value=String(target);goToPage(target);
       }}>
-        <label>第 <input key={current} name="page" aria-label="目标页码" inputMode="numeric" pattern="[0-9]*" maxLength={9} defaultValue={current} disabled={!count} onFocus={e=>e.currentTarget.select()}/></label>
-        <span>/ {count || '—'} 页</span>
-        <button type="submit" disabled={!count}>跳转</button>
+        <label>{t("第 ")}<input key={current} name="page" aria-label={t("目标页码")} inputMode="numeric" pattern="[0-9]*" maxLength={9} defaultValue={current} disabled={!count} onFocus={e=>e.currentTarget.select()}/></label>
+        <span>{t("/ {0} 页", { 0: count || '—' })}</span>
+        <button type="submit" disabled={!count}>{t("跳转")}</button>
       </form>
-      <button aria-label="下一页" disabled={current>=count} onClick={()=>goToPage(current+1)}><ChevronRight size={17}/></button></div>
-      {kind==='pdf'&&<div className="reader-quick"><button type="button" className="reader-text-toggle" aria-pressed={textReading} aria-label="文字阅读" onClick={()=>{if(textReading){alignAfterText.current=true;setTextReading(false);}else{stopRestoring();setTextReading(true);scroll.current?.scrollTo({top:0});}}}><AlignLeft size={16}/>文字阅读</button></div>}
+      <button aria-label={t("下一页")} disabled={current>=count} onClick={()=>goToPage(current+1)}><ChevronRight size={17}/></button></div>
+      {kind==='pdf'&&<div className="reader-quick"><button type="button" className="reader-text-toggle" aria-pressed={textReading} aria-label={t("文字阅读")} onClick={()=>{if(textReading){alignAfterText.current=true;setTextReading(false);}else{stopRestoring();setTextReading(true);scroll.current?.scrollTo({top:0});}}}><AlignLeft size={16}/>{t("文字阅读")}</button></div>}
       <details ref={toolsMenu} className="reader-tools">
-        <summary aria-label="更多阅读工具">工具</summary>
+        <summary aria-label={t("更多阅读工具")}>{t("工具")}</summary>
         <div className="reader-tools-body">
-          <details ref={thumbnailsMenu} className="reader-thumbnails" onToggle={event=>setThumbnailsOpen(event.currentTarget.open)}><summary aria-label="打开页面缩略图">缩略图</summary><div role="listbox" aria-label="选择页面">{thumbnailsOpen&&thumbnailPages.map(number=><button type="button" role="option" aria-selected={current===number} key={number} value={number} onClick={chooseThumbnail}><span>第 {number} 页</span><div className="reader-thumbnail"><ContinuousPage current={number} pdf={pdf} deck={deck} kind={kind} zoom={1} defaultRatio={pageRatio} mode="text" onSelect={()=>{}} onCrop={()=>false} onCropStart={()=>''} onCropState={()=>{}} feedback={null} priority focusRect={undefined}/></div></button>)}</div></details>
-          {annotations.some(item=>item.page===current)&&<details className="reader-annotation-list"><summary>本页批注 · {annotations.filter(item=>item.page===current).length}</summary><div>{annotations.filter(item=>item.page===current).map(item=><button type="button" key={item.id} onClick={()=>onOpenAnnotation?.(item.id,item.page)}>{item.label}</button>)}</div></details>}
-          <div className="reader-mode"><button aria-pressed={mode==='text'} onClick={()=>setMode('text')}><TextSelect size={16}/>选文字</button>
-          <button aria-pressed={mode==='crop'} onClick={()=>setMode('crop')}><Scan size={16}/>框选图片</button>
+          <details ref={thumbnailsMenu} className="reader-thumbnails" onToggle={event=>setThumbnailsOpen(event.currentTarget.open)}><summary aria-label={t("打开页面缩略图")}>{t("缩略图")}</summary><div role="listbox" aria-label={t("选择页面")}>{thumbnailsOpen&&thumbnailPages.map(number=><button type="button" role="option" aria-selected={current===number} key={number} value={number} onClick={chooseThumbnail}><span>{t("第 {0} 页", { 0: number })}</span><div className="reader-thumbnail"><ContinuousPage current={number} pdf={pdf} deck={deck} kind={kind} zoom={1} defaultRatio={pageRatio} mode="text" onSelect={()=>{}} onCrop={()=>false} onCropStart={()=>''} onCropState={()=>{}} feedback={null} priority focusRect={undefined}/></div></button>)}</div></details>
+          {annotations.some(item=>item.page===current)&&<details className="reader-annotation-list"><summary>{t("本页批注 · {0}", { 0: annotations.filter(item=>item.page===current).length })}</summary><div>{annotations.filter(item=>item.page===current).map(item=><button type="button" key={item.id} onClick={()=>onOpenAnnotation?.(item.id,item.page)}>{item.label}</button>)}</div></details>}
+          <div className="reader-mode"><button aria-pressed={mode==='text'} onClick={()=>setMode('text')}><TextSelect size={16}/>{t("选文字")}</button>
+          <button aria-pressed={mode==='crop'} onClick={()=>setMode('crop')}><Scan size={16}/>{t("框选图片")}</button>
           </div>
           <details className="reader-display" onKeyDown={event=>{if(event.key==='Escape'&&event.currentTarget.open){event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}>
-          <summary>显示</summary><div>
-          <button aria-pressed={layout==='continuous'} onClick={()=>setLayout('continuous')}>连续</button>
-          <button aria-pressed={layout==='single'} onClick={()=>setLayout('single')}>单页</button>
-          <button type="button" aria-label="适应宽度" onClick={()=>changeZoom(1)}>适应</button>
-          <button aria-label="缩小" disabled={zoom<=0.75} onClick={()=>changeZoom(Math.max(.75,zoom-.25))}><ZoomOut size={17}/></button>
-          <button aria-label="放大" disabled={zoom>=3} onClick={()=>changeZoom(Math.min(3,zoom+.25))}><ZoomIn size={17}/></button></div>
+          <summary>{t("显示")}</summary><div>
+          <button aria-pressed={layout==='continuous'} onClick={()=>setLayout('continuous')}>{t("连续")}</button>
+          <button aria-pressed={layout==='single'} onClick={()=>setLayout('single')}>{t("单页")}</button>
+          <button type="button" aria-label={t("适应宽度")} onClick={()=>changeZoom(1)}>{t("适应")}</button>
+          <button aria-label={t("缩小")} disabled={zoom<=0.75} onClick={()=>changeZoom(Math.max(.75,zoom-.25))}><ZoomOut size={17}/></button>
+          <button aria-label={t("放大")} disabled={zoom>=3} onClick={()=>changeZoom(Math.min(3,zoom+.25))}><ZoomIn size={17}/></button></div>
           </details>
         </div>
       </details>
     </div>
-    {error && <div className="reader-error" role="alert">{error} <button onClick={()=>setRevision(r=>r+1)}>重新加载</button></div>}
-    <div className="reader-scroll" data-layout={layout} ref={scroll} tabIndex={0} role="region" aria-label="讲义页面" onScroll={syncScroll} onWheel={stopRestoring} onTouchStart={stopRestoring} onPointerDown={stopRestoring}
+    {error && <div className="reader-error" role="alert">{t(error)} <button onClick={()=>setRevision(r=>r+1)}>{t("重新加载")}</button></div>}
+    <div className="reader-scroll" data-layout={layout} ref={scroll} tabIndex={0} role="region" aria-label={t("讲义页面")} onScroll={syncScroll} onWheel={stopRestoring} onTouchStart={stopRestoring} onPointerDown={stopRestoring}
       onKeyDown={event=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key))stopRestoring();}}>
-      {!count&&busy && <div role="status" className="reader-loading">正在解析文档…</div>}
+      {!count&&busy && <div role="status" className="reader-loading">{t("正在解析文档…")}</div>}
       {textMode
         ? <TextReading pdf={pdf!} page={current} count={count} onExit={()=>{alignAfterText.current=true;setTextReading(false);}}/>
         : <div ref={stack} className="reader-page-stack">{visiblePages.map(pageNumber=><div className="reader-annotated-page" key={pageNumber}><ContinuousPage current={pageNumber} pdf={pdf} deck={deck}
@@ -490,10 +492,10 @@ export default function Reader({documentId,navigation,lookup:lookupRef,url,kind,
     </div>
     {count>0&&<div className="reader-pagination">
       <span aria-hidden="true">1</span>
-      <input type="range" aria-label="拖动跳页" aria-valuetext={`第 ${current} 页，共 ${count} 页`} min={1} max={count} step={1} value={current} disabled={count===1} onChange={e=>goToPage(e.currentTarget.valueAsNumber)}/>
+      <input type="range" aria-label={t("拖动跳页")} aria-valuetext={t("第 {0} 页，共 {1} 页", { 0: current, 1: count })} min={1} max={count} step={1} value={current} disabled={count===1} onChange={e=>goToPage(e.currentTarget.valueAsNumber)}/>
       <span aria-hidden="true">{count}</span>
     </div>}
-    <p className="reader-hint">{textMode?'文字阅读来自 PDF 文本层，查看原文图像可回到版式与图表。':mode==='crop'?'拖动框选图表，按 Esc 取消选区。':'划选文字开始讨论，按 Esc 取消选区。'}{kind==='pptx'?' PPTX 为静态预览，复杂版式建议使用 PDF。':''}</p>
+    <p className="reader-hint">{textMode?t("文字阅读来自 PDF 文本层，查看原文图像可回到版式与图表。"):mode==='crop'?t("拖动框选图表，按 Esc 取消选区。"):t("划选文字开始讨论，按 Esc 取消选区。")}{kind==='pptx'?t(" PPTX 为静态预览，复杂版式建议使用 PDF。"):''}</p>
   </section>;
 }
 
@@ -503,6 +505,7 @@ type ContinuousPageProps=Pick<Props,'kind'|'onSelect'|'focusRect'|'annotations'|
 };
 
 function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,defaultRatio,onSelect,onCrop,onCropStart,onCropState,feedback,focusRect,annotations=[],onOpenAnnotation}:ContinuousPageProps){
+  const { t } = useLocale();
   const [busy,setBusy]=useState(true),[error,setError]=useState('');
   const [hasText,setHasText]=useState(kind!=='pdf'),[attempt,setAttempt]=useState(0);
   const [ratio,setRatio]=useState(defaultRatio);
@@ -665,16 +668,17 @@ function ContinuousPage({current,zoom,mode,kind,pdf,deck,priority,defaultRatio,o
           <canvas ref={canvas} hidden={kind!=='pdf'||busy}/>
           <div ref={text} className={kind==='pdf'?'textLayer':'slideLayer'} style={{visibility:busy?'hidden':'visible'}}/>
         </>}
-        {nearby&&renderState==='loading'&&<div className="reader-page-status" role="status">正在渲染第 {current} 页…</div>}
-        {nearby&&renderState==='empty-text'&&<div className="reader-page-status is-empty" role="status">本页没有可选择的文字，可用文字阅读或框选图片。</div>}
-        {error&&nearby&&<div className="reader-error" role="alert" title={error}>{/[一-鿿]/.test(error)?error:`第 ${current} 页渲染失败，请重试。`}<button type="button" onClick={()=>setAttempt(n=>n+1)}>重试</button></div>}
+        {nearby&&renderState==='loading'&&<div className="reader-page-status" role="status">{t("正在渲染第 {0} 页…", { 0: current })}</div>}
+        {nearby&&renderState==='empty-text'&&<div className="reader-page-status is-empty" role="status">{t("本页没有可选择的文字，可用文字阅读或框选图片。")}</div>}
+        {error&&nearby&&<div className="reader-error" role="alert" title={error}>{/[一-鿿]/.test(error)?t(error):t("第 {0} 页渲染失败，请重试。", { 0: current })}<button type="button" onClick={()=>setAttempt(n=>n+1)}>{t("重试")}</button></div>}
         {(highlight&&annotationsVisible(renderState)) && <div className="reader-highlight" style={{left:`${highlight[0]*100}%`,top:`${highlight[1]*100}%`,width:`${highlight[2]*100}%`,height:`${highlight[3]*100}%`}}/>}
-        {feedback&&<div className="reader-crop-feedback" role="status" aria-live="polite" style={{left:`${Math.min(72,Math.max(4,feedback.rect[0]*100))}%`,top:`${Math.min(82,Math.max(4,(feedback.rect[1]+feedback.rect[3])*100+2))}%`}}>{feedback.message}</div>}
+        {feedback&&<div className="reader-crop-feedback" role="status" aria-live="polite" style={{left:`${Math.min(72,Math.max(4,feedback.rect[0]*100))}%`,top:`${Math.min(82,Math.max(4,(feedback.rect[1]+feedback.rect[3])*100+2))}%`}}>{t(feedback.message)}</div>}
         {annotationsVisible(renderState)&&annotations.map((annotation,index)=><button type="button" className="reader-page-annotation" key={annotation.id} title={annotation.label} style={annotation.rect?{left:`${annotation.rect[0]*100}%`,top:`${annotation.rect[1]*100}%`}:{right:8,top:8+index*38}} onClick={()=>onOpenAnnotation?.(annotation.id,annotation.page)}>{annotation.label}</button>)}
       </div>;
 }
 
 function TextReading({pdf,page,count,onExit}:{pdf:PdfDocument;page:number;count:number;onExit:()=>void}){
+  const { t } = useLocale();
   const [state,setState]=useState<{status:'loading'|'error'|'ready';text:string;error:string}>({status:'loading',text:'',error:''});
   const [attempt,setAttempt]=useState(0);
   useEffect(()=>{
@@ -690,16 +694,16 @@ function TextReading({pdf,page,count,onExit}:{pdf:PdfDocument;page:number;count:
     return ()=>{stopped=true;};
   },[pdf,page,attempt]);
   const sparse=state.status==='ready'&&isSparseText(state.text);
-  return <div className="reader-text-reading" role="region" aria-label={`第 ${page} 页文字阅读`}>
+  return <div className="reader-text-reading" role="region" aria-label={t("第 {0} 页文字阅读", { 0: page })}>
     <div className="reader-text-heading">
-      <span>第 {page} 页 · 文字阅读</span>
-      <span className="reader-text-total">共 {count} 页</span>
-      <button type="button" onClick={onExit}>查看原文图像</button>
+      <span>{t("第 {0} 页 · 文字阅读", { 0: page })}</span>
+      <span className="reader-text-total">{t("共 {0} 页", { 0: count })}</span>
+      <button type="button" onClick={onExit}>{t("查看原文图像")}</button>
     </div>
-    {state.status==='loading'&&<div className="reader-text-status" role="status">正在读取第 {page} 页文字…</div>}
-    {state.status==='error'&&<div className="reader-text-status is-error" role="alert">{state.error}<button type="button" onClick={()=>setAttempt(n=>n+1)}>重试</button><button type="button" onClick={onExit}>查看原文图像</button></div>}
+    {state.status==='loading'&&<div className="reader-text-status" role="status">{t("正在读取第 {0} 页文字…", { 0: page })}</div>}
+    {state.status==='error'&&<div className="reader-text-status is-error" role="alert">{t(state.error)}<button type="button" onClick={()=>setAttempt(n=>n+1)}>{t("重试")}</button><button type="button" onClick={onExit}>{t("查看原文图像")}</button></div>}
     {state.status==='ready'&&(sparse
-      ? <div className="reader-text-status" role="status">本页没有足够的可提取文字（可能是扫描页或纯图表）。<button type="button" onClick={onExit}>查看原文图像</button></div>
+      ? <div className="reader-text-status" role="status">{t("本页没有足够的可提取文字（可能是扫描页或纯图表）。")}<button type="button" onClick={onExit}>{t("查看原文图像")}</button></div>
       : <div className="reader-text-body">{state.text}</div>)}
   </div>;
 }

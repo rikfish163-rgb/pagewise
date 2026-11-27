@@ -1,3 +1,5 @@
+import { translate, type Locale } from './i18n.ts';
+
 export type MemoryKind = 'gap' | 'practice' | 'progress';
 export type MemoryStage = 'review' | 'practice' | 'mastered';
 
@@ -93,8 +95,11 @@ export function memoryMatches(output:string, candidates:TopicCard[]): TopicCard[
   return [...new Set<number>(matches)].slice(0,4).map(id=>candidates[id-1]);
 }
 
-export function evidencePageLabel(source: Pick<Evidence,'page'|'pages'>) {
-  return `第 ${(source.pages??[source.page]).join('、')} 页`;
+export function evidencePageLabel(source: Pick<Evidence,'page'|'pages'>, locale: Locale = 'zh-CN') {
+  const pageNumbers = source.pages?.length ? source.pages : [source.page];
+  if (pageNumbers.length === 1) return translate(locale, '第 {page} 页', { page: pageNumbers[0] });
+  const pages = pageNumbers.join(locale === 'en' ? ', ' : '、');
+  return translate(locale, '第 {pages} 页', { pages });
 }
 
 export function memoryPromptData(cards:TopicCard[]) {

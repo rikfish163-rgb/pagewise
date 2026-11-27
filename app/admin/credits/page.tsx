@@ -1,10 +1,14 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { AdminCredits } from '@/components/AdminCredits';
+import { AdminCredits, AdminCreditsHeading } from '@/components/AdminCredits';
+import { localeCookieName, resolveLocale, translate } from '@/lib/i18n';
 import { getSiteAccount } from '../../site-account';
 
-export const metadata: Metadata = { title: '积分管理 · 页边' };
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = resolveLocale((await cookies()).get(localeCookieName)?.value);
+  return { title: translate(locale, '积分管理 · 页边') };
+}
 export const dynamic = 'force-dynamic';
 
 export default async function AdminCreditsPage() {
@@ -13,10 +17,7 @@ export default async function AdminCreditsPage() {
 
   return (
     <main className="admin-credits">
-      <header className="admin-credits-heading">
-        <Link href="/#home">‹ 返回页边</Link>
-        <h1>积分管理</h1>
-      </header>
+      <AdminCreditsHeading/>
       <AdminCredits />
     </main>
   );

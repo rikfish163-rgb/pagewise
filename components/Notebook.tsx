@@ -1,5 +1,7 @@
 'use client';
 
+import { useLocale } from './LocaleProvider';
+import { translate, type Locale } from '../lib/i18n';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {BookOpen, ChevronLeft, FileText, Link2, MessageSquare, NotebookPen, Plus, Search, Trash2, X} from 'lucide-react';
@@ -46,14 +48,15 @@ async function noteRequest<T>(path = '', value?: unknown, method = value === und
   return data as T;
 }
 const saveLabels = {saved: '已同步', dirty: '待保存', saving: '保存中…', error: '保存失败', conflict: '需要合并'};
-const threadLabel = (thread: Discussion) => thread.messages.some(message => message.role === 'user')
-  ? discussionTitle(thread)
-  : `第 ${thread.page} 页 · ${thread.text && thread.text !== '按页提问' ? thread.text.slice(0, 60) : '笔记对话'}`;
+const threadLabel = (thread: Discussion, locale: Locale = 'zh-CN') => thread.messages.some(message => message.role === 'user')
+  ? discussionTitle(thread, locale)
+  : translate(locale, '第 {page} 页 · {title}', {page: thread.page, title: thread.text && thread.text !== '按页提问' ? thread.text.slice(0, 60) : translate(locale, '笔记对话')});
 
 export default function Notebook({
   visible, full, panelHost, docs, threads, projects, currentSource, view, inserts, retryInsertId,
   onInsertResult, onNotesChange, onExpand, onClose, onOpenSource,
 }: NotebookProps) {
+  const { t, locale } = useLocale();
   const [store, setStore] = useState<Store>({});
   const storeRef = useRef<Store>({});
   const changeStore = useCallback((update: (value: Store) => Store) => {
@@ -298,90 +301,90 @@ export default function Notebook({
 
   function noteList() {
     return <>
-      <label className="nl-search"><Search size={16}/><input type="search" aria-label="搜索笔记" placeholder="搜索编号、标题或正文" value={query} onChange={event => setQuery(event.target.value)}/></label>
+      <label className="nl-search"><Search size={16}/><input type="search" aria-label={t("搜索笔记")} placeholder={t("搜索编号、标题或正文")} value={query} onChange={event => setQuery(event.target.value)}/></label>
       <div className="nl-filters">
-        <select aria-label="按项目筛选笔记" value={project} onChange={event => {setProject(event.target.value); setThreadId(''); setActiveId(''); setMobileEditing(false);}}>
-          <option value="">全部项目</option>{allProjects.map(name => <option key={name} value={name}>{name}</option>)}
+        <select aria-label={t("按项目筛选笔记")} value={project} onChange={event => {setProject(event.target.value); setThreadId(''); setActiveId(''); setMobileEditing(false);}}>
+          <option value="">{t("全部项目")}</option>{allProjects.map(name => <option key={name} value={name}>{name}</option>)}
         </select>
-        <select aria-label="按对话筛选笔记" value={threadId} onChange={event => {setThreadId(event.target.value); setActiveId(''); setMobileEditing(false);}}>
-          <option value="">全部对话</option>{scopeThreads.map(thread => <option key={thread.id} value={thread.id}>{threadLabel(thread)}</option>)}
-          {threadId && !scopeThreads.some(thread => thread.id === threadId) && <option value={threadId}>原对话已删除</option>}
+        <select aria-label={t("按对话筛选笔记")} value={threadId} onChange={event => {setThreadId(event.target.value); setActiveId(''); setMobileEditing(false);}}>
+          <option value="">{t("全部对话")}</option>{scopeThreads.map(thread => <option key={thread.id} value={thread.id}>{threadLabel(thread, locale)}</option>)}
+          {threadId && !scopeThreads.some(thread => thread.id === threadId) && <option value={threadId}>{t("原对话已删除")}</option>}
         </select>
       </div>
-      <p className="nl-count" role="status">{filtered.length} 条笔记{loading ? '，正在同步…' : ''}</p>
-      <nav className="nl-note-list" aria-label="笔记列表">{filtered.map(item =>
+      <p className="nl-count" role="status">{t("{0} 条笔记{1}", { 0: filtered.length, 1: loading ? t('，正在同步…') : '' })}</p>
+      <nav className="nl-note-list" aria-label={t("笔记列表")}>{filtered.map(item =>
         <button type="button" key={item.id} className="nl-note" aria-current={note?.id === item.id ? 'page' : undefined}
           onClick={() => {setActiveId(item.id); setMobileEditing(true);}}>
-          <span className="nl-note-heading"><span className="nl-number">{noteNumber(item.number)}</span><strong>{item.title || '未命名笔记'}</strong>
-            {store[item.id].status !== 'saved' && <span className="nl-unsaved" aria-label={saveLabels[store[item.id].status]}/>}</span>
-          <span className="nl-note-excerpt">{noteExcerpt(item.body) || '还没有正文'}</span>
-          <small>{[...new Set(item.sources.map(source => source.project))].join('、') || '独立笔记'}
-            {item.sources.filter(source => source.threadId).length > 0 && ` · ${item.sources.filter(source => source.threadId).length} 个对话`}</small>
+          <span className="nl-note-heading"><span className="nl-number">{noteNumber(item.number)}</span><strong>{item.title || t("未命名笔记")}</strong>
+            {store[item.id].status !== 'saved' && <span className="nl-unsaved" aria-label={t(saveLabels[store[item.id].status])}/>}</span>
+          <span className="nl-note-excerpt">{noteExcerpt(item.body) || t("还没有正文")}</span>
+          <small>{[...new Set(item.sources.map(source => source.project))].join('、') || t("独立笔记")}
+            {item.sources.filter(source => source.threadId).length > 0 && t(" · {0} 个对话", { 0: item.sources.filter(source => source.threadId).length })}</small>
         </button>,
       )}</nav>
-      {loaded && !filtered.length && <div className="nl-list-empty"><NotebookPen size={26}/><p>{notes.length ? '没有匹配的笔记' : '还没有笔记'}</p>
-        <span>{query || project || threadId ? '调整筛选条件，或在这里新建。' : '在对话中记录想法，或新建一条独立笔记。'}</span></div>}
+      {loaded && !filtered.length && <div className="nl-list-empty"><NotebookPen size={26}/><p>{notes.length ? t("没有匹配的笔记") : t("还没有笔记")}</p>
+        <span>{query || project || threadId ? t("调整筛选条件，或在这里新建。") : t("在对话中记录想法，或新建一条独立笔记。")}</span></div>}
     </>;
   }
   const content = <section className={`notebook-library ${full ? 'nl-full' : 'nl-compact'} ${mobileEditing ? 'nl-editing' : ''}`}
-    hidden={!visible} aria-label="学习笔记本">
-    <header className="nl-header"><div><NotebookPen size={21}/><h1>笔记本</h1></div><div className="nl-header-actions">
-      {full ? <button type="button" onClick={onClose}><BookOpen size={16}/>返回</button> : <button type="button" onClick={() => onExpand(note?.id)}>全部笔记本</button>}
-      <button type="button" className="nl-create" disabled={!loaded || creating} onClick={() => {void create();}}><Plus size={16}/>{creating ? '创建中…' : '新建笔记'}</button>
+    hidden={!visible} aria-label={t("学习笔记本")}>
+    <header className="nl-header"><div><NotebookPen size={21}/><h1>{t("笔记本")}</h1></div><div className="nl-header-actions">
+      {full ? <button type="button" onClick={onClose}><BookOpen size={16}/>{t("返回")}</button> : <button type="button" onClick={() => onExpand(note?.id)}>{t("全部笔记本")}</button>}
+      <button type="button" className="nl-create" disabled={!loaded || creating} onClick={() => {void create();}}><Plus size={16}/>{creating ? t("创建中…") : t("新建笔记")}</button>
     </div></header>
-    {loadError && <div className="nl-error" role="alert"><span>{loadError}</span><button type="button" disabled={loading} onClick={() => {void load();}}>重新读取</button></div>}
-    {operationError && <div className="nl-error" role="alert"><span>{operationError}</span>
-      {manualCreate.current||failed.current.size>0?<button type="button" disabled={creating} onClick={retryOperations}>重试</button>:<button type="button" onClick={()=>setOperationError('')}>关闭</button>}</div>}
-    {!loaded && !loadError && <p className="nl-loading" role="status">正在读取笔记本…</p>}
+    {loadError && <div className="nl-error" role="alert"><span>{t(loadError)}</span><button type="button" disabled={loading} onClick={() => {void load();}}>{t("重新读取")}</button></div>}
+    {operationError && <div className="nl-error" role="alert"><span>{t(operationError)}</span>
+      {manualCreate.current||failed.current.size>0?<button type="button" disabled={creating} onClick={retryOperations}>{t("重试")}</button>:<button type="button" onClick={()=>setOperationError('')}>{t("关闭")}</button>}</div>}
+    {!loaded && !loadError && <p className="nl-loading" role="status">{t("正在读取笔记本…")}</p>}
     <div className="nl-body">
       {full ? <aside className="nl-index" ref={indexHost}>{noteList()}</aside> : <details className="nl-switcher" open={!note}>
-        <summary><FileText size={15}/><span>{note ? `${noteNumber(note.number)} ${note.title}` : '选择笔记'}</span><small>{notes.length} 条</small></summary>
+        <summary><FileText size={15}/><span>{note ? `${noteNumber(note.number)} ${note.title}` : t("选择笔记")}</span><small>{t("{0} 条", { 0: notes.length })}</small></summary>
         <div className="nl-index">{noteList()}</div>
       </details>}
       {entry && note ? <article className="nl-document">
         <div className="nl-document-header">
-          {full && <button type="button" className="nl-back-list" onClick={() => {setMobileEditing(false); indexHost.current?.querySelector<HTMLButtonElement>('[aria-current=page]')?.focus();}}><ChevronLeft size={17}/>笔记列表</button>}
-          <label className="nl-number-field">编号<input type="number" aria-label="笔记编号" min={1} max={999999999} key={`${note.id}:${note.number}`} defaultValue={note.number}
+          {full && <button type="button" className="nl-back-list" onClick={() => {setMobileEditing(false); indexHost.current?.querySelector<HTMLButtonElement>('[aria-current=page]')?.focus();}}><ChevronLeft size={17}/>{t("笔记列表")}</button>}
+          <label className="nl-number-field">{t("编号")}<input type="number" aria-label={t("笔记编号")} min={1} max={999999999} key={`${note.id}:${note.number}`} defaultValue={note.number}
             onBlur={event => {const value = event.currentTarget.valueAsNumber; if (Number.isInteger(value) && value >= 1 && value <= 999999999) {if (value !== note.number) edit({number: value});} else event.currentTarget.value = String(note.number);}}
             onKeyDown={event => {if (event.key === 'Enter') event.currentTarget.blur();}}/></label>
-          <button type="button" className="nl-delete" aria-label="删除这条笔记" disabled={entry.status === 'saving'}
+          <button type="button" className="nl-delete" aria-label={t("删除这条笔记")} disabled={entry.status === 'saving'}
             onClick={() => {setRemoving(note); deleteDialog.current?.showModal();}}><Trash2 size={16}/></button>
         </div>
-        <input className="nl-note-title" aria-label="笔记标题" placeholder="未命名笔记" maxLength={120} value={note.title} onChange={event => edit({title: event.target.value})}/>
+        <input className="nl-note-title" aria-label={t("笔记标题")} placeholder={t("未命名笔记")} maxLength={120} value={note.title} onChange={event => edit({title: event.target.value})}/>
         <div className="nl-sources">
-          <div className="nl-sources-heading"><span><Link2 size={14}/>关联来源</span>
-            {currentSource?.threadId&&!note.sources.some(source=>source.threadId===currentSource.threadId)&&<button type="button" onClick={addCurrentSource}><MessageSquare size={14}/>关联当前对话</button>}
-            <button type="button" onClick={openSources}><Plus size={14}/>关联项目或对话</button></div>
+          <div className="nl-sources-heading"><span><Link2 size={14}/>{t("关联来源")}</span>
+            {currentSource?.threadId&&!note.sources.some(source=>source.threadId===currentSource.threadId)&&<button type="button" onClick={addCurrentSource}><MessageSquare size={14}/>{t("关联当前对话")}</button>}
+            <button type="button" onClick={openSources}><Plus size={14}/>{t("关联项目或对话")}</button></div>
           {displaySources.length > 0 ? <ul>{displaySources.map(source => <li key={source.key}>
             <button type="button" className="nl-source-link" disabled={!source.available || !source.docId} title={source.discussionTitle}
               onClick={() => onOpenSource(source)}>{source.threadId ? <MessageSquare size={14}/> : <FileText size={14}/>}
-              <span><strong>{source.project}</strong><span>{source.discussionTitle ?? source.documentName ?? '整个项目'}</span>
-                {!source.available && <small>来源已删除，笔记仍保留</small>}</span></button>
-            <button type="button" className="nl-source-remove" aria-label={`移除关联：${source.discussionTitle ?? source.documentName ?? source.project}`}
+              <span><strong>{source.project}</strong><span>{source.discussionTitle ?? source.documentName ?? t("整个项目")}</span>
+                {!source.available && <small>{t("来源已删除，笔记仍保留")}</small>}</span></button>
+            <button type="button" className="nl-source-remove" aria-label={t("移除关联：{0}", { 0: source.discussionTitle ?? source.documentName ?? source.project })}
               onClick={() => edit({sources: note.sources.filter(item => item.key !== source.key)})}><X size={14}/></button>
-          </li>)}</ul> : <p>可关联多个项目和对话，在同一条笔记里整理。</p>}
+          </li>)}</ul> : <p>{t("可关联多个项目和对话，在同一条笔记里整理。")}</p>}
         </div>
         <NotebookEditor key={note.id} body={note.body} title={note.title} number={note.number}
           status={entry.error ?? saveLabels[entry.status]} blocked={entry.status === 'conflict'}
           onChange={body => edit({body})} onRetry={() => {void save(note.id);}} onReload={() => {void reloadSaved();}} reloading={reloading}/>
-        {entry.status === 'error' && <button type="button" className="nl-retry-save" onClick={() => {void save(note.id);}}>重试保存</button>}
-      </article> : full && loaded && <div className="nl-document-empty"><NotebookPen size={38}/><h2>把思考留在笔记里</h2><p>选择一条笔记继续写，或新建一条。<br/>笔记可以关联来自不同项目的对话。</p><button type="button" disabled={creating} onClick={() => {void create();}}><Plus size={16}/>新建笔记</button></div>}
+        {entry.status === 'error' && <button type="button" className="nl-retry-save" onClick={() => {void save(note.id);}}>{t("重试保存")}</button>}
+      </article> : full && loaded && <div className="nl-document-empty"><NotebookPen size={38}/><h2>{t("把思考留在笔记里")}</h2><p>{t("选择一条笔记继续写，或新建一条。")}<br/>{t("笔记可以关联来自不同项目的对话。")}</p><button type="button" disabled={creating} onClick={() => {void create();}}><Plus size={16}/>{t("新建笔记")}</button></div>}
     </div>
     <dialog className="nl-dialog" ref={sourceDialog} aria-labelledby="note-source-title">
-      <form onSubmit={addSource}><h2 id="note-source-title">关联项目或对话</h2><p>选择来源，同一条笔记可以关联多个项目。</p>
-        <label>项目<select required value={sourceProject} onChange={event => {setSourceProject(event.target.value); setSourceDoc(''); setSourceThread('');}}>
-          <option value="" disabled>选择项目</option>{projects.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
-        <label>资料<select value={sourceDoc} onChange={event => {setSourceDoc(event.target.value); setSourceThread('');}}><option value="">整个项目</option>{sourceDocs.map(doc => <option key={doc.id} value={doc.id}>{doc.name}</option>)}</select></label>
-        <label>对话<select value={sourceThread} onChange={event => setSourceThread(event.target.value)}><option value="">仅关联项目或资料</option>{sourceThreads.map(thread => <option key={thread.id} value={thread.id}>{threadLabel(thread)}</option>)}</select></label>
-        {!projects.length && <p>先新建项目或导入资料，即可关联来源。</p>}
+      <form onSubmit={addSource}><h2 id="note-source-title">{t("关联项目或对话")}</h2><p>{t("选择来源，同一条笔记可以关联多个项目。")}</p>
+        <label>{t("项目")}<select required value={sourceProject} onChange={event => {setSourceProject(event.target.value); setSourceDoc(''); setSourceThread('');}}>
+          <option value="" disabled>{t("选择项目")}</option>{projects.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
+        <label>{t("资料")}<select value={sourceDoc} onChange={event => {setSourceDoc(event.target.value); setSourceThread('');}}><option value="">{t("整个项目")}</option>{sourceDocs.map(doc => <option key={doc.id} value={doc.id}>{doc.name}</option>)}</select></label>
+        <label>{t("对话")}<select value={sourceThread} onChange={event => setSourceThread(event.target.value)}><option value="">{t("仅关联项目或资料")}</option>{sourceThreads.map(thread => <option key={thread.id} value={thread.id}>{threadLabel(thread, locale)}</option>)}</select></label>
+        {!projects.length && <p>{t("先新建项目或导入资料，即可关联来源。")}</p>}
         {sourceError && <p className="nl-error" role="alert">{sourceError}</p>}
-        <div className="nl-dialog-actions"><button type="button" onClick={() => sourceDialog.current?.close()}>取消</button><button type="submit" disabled={!sourceProject}><Link2 size={15}/>添加关联</button></div>
+        <div className="nl-dialog-actions"><button type="button" onClick={() => sourceDialog.current?.close()}>{t("取消")}</button><button type="submit" disabled={!sourceProject}><Link2 size={15}/>{t("添加关联")}</button></div>
       </form>
     </dialog>
     <dialog className="nl-dialog" ref={deleteDialog} aria-labelledby="note-delete-title" onCancel={event => {if (deleting) event.preventDefault();}}>
-      <form onSubmit={deleteNote}><h2 id="note-delete-title">删除笔记</h2><p>确认删除 {removing ? `${noteNumber(removing.number)}「${removing.title}」` : '这条笔记'}？</p><p>删除后无法恢复，来源项目和对话会保留。</p>
+      <form onSubmit={deleteNote}><h2 id="note-delete-title">{t("删除笔记")}</h2><p>{t("确认删除 {0}？", { 0: removing ? `${noteNumber(removing.number)}「${removing.title}」` : '这条笔记' })}</p><p>{t("删除后无法恢复，来源项目和对话会保留。")}</p>
         {operationError && <p className="nl-error" role="alert">{operationError}</p>}
-        <div className="nl-dialog-actions"><button type="button" disabled={deleting} onClick={() => deleteDialog.current?.close()}>取消</button><button type="submit" className="nl-danger" disabled={deleting}>{deleting ? '删除中…' : '删除笔记'}</button></div>
+        <div className="nl-dialog-actions"><button type="button" disabled={deleting} onClick={() => deleteDialog.current?.close()}>{t("取消")}</button><button type="submit" className="nl-danger" disabled={deleting}>{deleting ? t("删除中…") : t("删除笔记")}</button></div>
       </form>
     </dialog>
   </section>;

@@ -1,4 +1,5 @@
 import {discussionTitle, type Discussion, type StudyDoc} from './workspace-model.ts';
+import { translate, type Locale } from './i18n.ts';
 import type {StudyNote} from './notebook-model';
 
 export type StudySearchKind = 'project' | 'doc' | 'question' | 'answer' | 'excerpt' | 'note';
@@ -17,8 +18,13 @@ export type StudySearchResult = {
 
 export type StudySearchGroup = {kind: StudySearchKind; label: string; results: StudySearchResult[]};
 
-const groupLabels: Record<StudySearchKind, string> = {
-  project: '项目', doc: '资料', question: '提问', answer: '回答', excerpt: '讲义摘录', note: '笔记',
+const groupLabels: Record<StudySearchKind, Record<Locale, string>> = {
+  project: { 'zh-CN': '项目', en: 'Projects' },
+  doc: { 'zh-CN': '资料', en: 'Documents' },
+  question: { 'zh-CN': '提问', en: 'Questions' },
+  answer: { 'zh-CN': '回答', en: 'Answers' },
+  excerpt: { 'zh-CN': '讲义摘录', en: 'Document excerpts' },
+  note: { 'zh-CN': '笔记', en: 'Notes' },
 };
 const groupOrder: StudySearchKind[] = ['project', 'doc', 'question', 'answer', 'excerpt', 'note'];
 const perGroup = 10;
@@ -50,8 +56,9 @@ function questionPage(thread: Discussion, index: number): number {
 // Search runs only over material this account already loaded. Draft threads and
 // threads whose document is gone are not reviewable sources, so they never
 // appear as results.
-export function searchStudy({docs, threads, notes, query, project = ''}:
-  {docs: StudyDoc[]; threads: Discussion[]; notes: StudyNote[]; query: string; project?: string}): StudySearchGroup[] {
+export function searchStudy({docs, threads, notes, query, project = '', locale = 'zh-CN'}:
+  {docs: StudyDoc[]; threads: Discussion[]; notes: StudyNote[]; query: string; project?: string; locale?: Locale}): StudySearchGroup[] {
+  const t = (message: string, values?: Record<string, string | number>) => translate(locale, message, values);
   const term = query.trim().toLocaleLowerCase();
   if (!term) return [];
   const documents = new Map(docs.map(doc => [doc.id, doc]));
@@ -65,7 +72,7 @@ export function searchStudy({docs, threads, notes, query, project = ''}:
     if (!matches(course, term)) continue;
     groups.project.push({
       key: `project:${course}`, kind: 'project', title: course,
-      snippet: '', meta: `${docs.filter(doc => doc.course === course).length} 份资料`,
+      snippet: '', meta: t('{count} 份资料', { count: docs.filter(doc => doc.course === course).length }),
     });
   }
 
@@ -82,7 +89,7 @@ export function searchStudy({docs, threads, notes, query, project = ''}:
     const doc = documents.get(thread.docId);
     if (!doc || !inScope(doc)) continue;
     const title = discussionTitle(thread);
-    const meta = (page: number) => `${docTitle(doc)} · 第 ${page} 页`;
+    const meta = (page: number) => `${docTitle(doc)} · ${t('第 {page} 页', { page })}`;
     thread.messages.forEach((message, index) => {
       if (message.role !== 'user' && message.role !== 'assistant') return;
       if (!matches(message.content, term)) return;
@@ -102,7 +109,7 @@ export function searchStudy({docs, threads, notes, query, project = ''}:
       const page = message.page ?? thread.page;
       groups.excerpt.push({
         key: `excerpt:${thread.id}:${index}`, kind: 'excerpt',
-        title: `第 ${page} 页 · 讲义摘录`,
+        title: t('第 {page} 页 · 讲义摘录', { page }),
         snippet: matchSnippet(excerpt, query), meta: meta(page),
         docId: doc.id, threadId: thread.id, page,
       });
@@ -110,7 +117,7 @@ export function searchStudy({docs, threads, notes, query, project = ''}:
     if (thread.text && thread.text !== '按页提问' && matches(thread.text, term)) {
       groups.excerpt.push({
         key: `excerpt:${thread.id}`, kind: 'excerpt',
-        title: `第 ${thread.page} 页 · 讲义摘录`,
+        title: t('第 {page} 页 · 讲义摘录', { page: thread.page }),
         snippet: matchSnippet(thread.text, query), meta: meta(thread.page),
         docId: doc.id, threadId: thread.id, page: thread.page,
       });
@@ -128,14 +135,14 @@ export function searchStudy({docs, threads, notes, query, project = ''}:
     const threadId = note.sources.find(source => source.threadId)?.threadId;
     groups.note.push({
       key: `note:${note.id}`, kind: 'note',
-      title: `#${String(note.number).padStart(3, '0')} ${note.title || '未命名笔记'}`,
+      title: `#${String(note.number).padStart(3, '0')} ${note.title || t('未命名笔记')}`,
       snippet: matchSnippet(`${note.title} ${note.body}`.trim(), query),
-      meta: [noteProjects.join('、') || '独立笔记', page ? `第 ${page} 页` : ''].filter(Boolean).join(' · '),
+      meta: [noteProjects.join(locale === 'en' ? ', ' : '、') || t('独立笔记'), page ? t('第 {page} 页', { page }) : ''].filter(Boolean).join(' · '),
       noteId: note.id, ...(docId ? {docId} : {}), ...(threadId ? {threadId} : {}), ...(page ? {page} : {}),
     });
   }
 
   return groupOrder
-    .map(kind => ({kind, label: groupLabels[kind], results: groups[kind].slice(0, perGroup)}))
+    .map(kind => ({kind, label: groupLabels[kind][locale], results: groups[kind].slice(0, perGroup)}))
     .filter(group => group.results.length > 0);
 }

@@ -1,4 +1,5 @@
 'use client';
+import { useLocale } from './LocaleProvider';
 import { useEffect, useRef } from 'react';
 import './desk-divider.css';
 
@@ -6,6 +7,7 @@ type Drag={pointer:number; x:number; width:number};
 
 /** Width belongs to the reading desk, not to a document or a discussion. */
 export default function DeskDivider({side='right'}:{side?:'left'|'right'}){
+  const { t } = useLocale();
   const left=side==='left',minimum=left?144:280;
   const preference=left?'pagewise:library-width':'pagewise:discussion-width',variable=left?'--shelf-width':'--panel-width';
   const ref=useRef<HTMLDivElement>(null);
@@ -53,5 +55,5 @@ export default function DeskDivider({side='right'}:{side?:'left'|'right'}){
     handle.addEventListener('keydown',key);handle.addEventListener('dblclick',reset);
     return ()=>{observer.disconnect();delete desk.dataset.resizing;handle.removeEventListener('pointerdown',down);handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('lostpointercapture',end);handle.removeEventListener('keydown',key);handle.removeEventListener('dblclick',reset);};
   },[left,minimum,preference,variable]);
-  return <div ref={ref} role="separator" aria-label={left?"调整资料库和讲义宽度":"调整讲义和讨论栏宽度"} aria-controls={left?"study-library":"discussion-panel"} aria-orientation="vertical" aria-valuemin={minimum} aria-valuenow={left?208:360} tabIndex={0} title="拖动调整列宽，双击恢复默认" className={left?"desk-divider shelf-divider":"desk-divider"}/>;
+  return <div ref={ref} role="separator" aria-label={left?t("调整资料库和讲义宽度"):t("调整讲义和讨论栏宽度")} aria-controls={left?"study-library":"discussion-panel"} aria-orientation="vertical" aria-valuemin={minimum} aria-valuenow={left?208:360} tabIndex={0} title={t("拖动调整列宽，双击恢复默认")} className={left?"desk-divider shelf-divider":"desk-divider"}/>;
 }

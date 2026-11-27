@@ -33,6 +33,18 @@
   font-size: 9px;
   letter-spacing: 0.22em;
 }
+html:lang(en) .workspace .masthead .brand-en { display: none; }
+html:lang(en) .workspace .masthead .brand > span:last-child {
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+html:lang(en) .workspace .margin-header { flex-wrap: wrap; gap: 6px; }
+html:lang(en) .workspace .panel-tabs { min-width: 0; gap: 6px; }
+html:lang(en) .workspace .panel-tabs > button {
+  padding-inline: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}
 .workspace .brand-mark {
   border-radius: 50%;
   background: color-mix(in srgb, var(--accent-soft) 62%, transparent);
@@ -153,6 +165,16 @@
   .account-trigger span { display: none; }
   .workspace .masthead .import-button { inline-size: auto; padding: 0 10px; }
   .workspace .account-trigger { width: 34px; height: 34px; }
+}
+@media (max-width: 480px) {
+  .workspace .masthead { padding-inline: 8px; gap: 5px; }
+  .workspace .masthead .hub-link { display: none; }
+  .workspace .masthead .brand > span:last-child { display: none; }
+  .workspace .masthead .notebook-nav span,
+  .workspace .masthead .import-button > span { display: none; }
+  .workspace .masthead .notebook-nav { padding-inline: 6px; }
+  .workspace .masthead .source-trigger > span { display: none; }
+  .workspace .masthead .source-trigger { padding-inline: 6px; min-width: 36px; }
 }
 @media (pointer: coarse) {
   .workspace .masthead :is(.hub-link, .notebook-nav, .account-trigger, .import-button) { min-height: 44px; }

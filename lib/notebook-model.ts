@@ -1,3 +1,5 @@
+import { translate, type Locale } from './i18n.ts';
+
 import type {Discussion, StudyDoc} from './workspace-model';
 
 export type NoteSourceInput = {
@@ -58,14 +60,16 @@ const saveScopeLabels: Record<NoteSaveIntent['kind'], string> = {
   selection: '讲义选区', answer: '一轮回答', discussion: '整段讨论',
 };
 
-export function noteSaveScopeLabel(intent: NoteSaveIntent): string {
-  return saveScopeLabels[intent.kind];
+export function noteSaveScopeLabel(intent: NoteSaveIntent, locale: Locale = 'zh-CN'): string {
+  return translate(locale, saveScopeLabels[intent.kind]);
 }
 
-export function noteSaveChoiceLabel(choice: NoteSaveChoice, notes: StudyNote[]): string {
-  if (choice.mode === 'create') return '新建笔记';
+export function noteSaveChoiceLabel(choice: NoteSaveChoice, notes: StudyNote[], locale: Locale = 'zh-CN'): string {
+  if (choice.mode === 'create') return translate(locale, '新建笔记');
   const note = notes.find(item => item.id === choice.noteId);
-  return note ? `追加到 ${noteNumber(note.number)} · ${note.title || '未命名笔记'}` : '追加到已删除的笔记';
+  return note ? translate(locale, '追加到 {number} · {title}', {
+    number: noteNumber(note.number), title: note.title || translate(locale, '未命名笔记'),
+  }) : translate(locale, '追加到已删除的笔记');
 }
 
 // One definition for both the client preview and the server write, so the

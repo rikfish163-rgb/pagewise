@@ -1,3 +1,4 @@
+import { useLocale } from './LocaleProvider';
 import { formatAdminCredits } from './AdminCreditsAmount';
 
 type Adjustment = {
@@ -16,9 +17,10 @@ const historyDate = new Intl.DateTimeFormat('zh-CN', {
 });
 
 export function AdminCreditsHistory({ adjustments, showTargets }: { adjustments: Adjustment[]; showTargets: boolean }) {
+  const { t } = useLocale();
   return (
     <section className="admin-credits-section" aria-labelledby="admin-credits-history">
-      <h2 id="admin-credits-history">近期调整</h2>
+      <h2 id="admin-credits-history">{t("近期调整")}</h2>
       {adjustments.length ? (
         <ol className="admin-credits-history">
           {adjustments.map(item => (
@@ -30,12 +32,12 @@ export function AdminCreditsHistory({ adjustments, showTargets }: { adjustments:
                 </time>
               </div>
               <p className="admin-credits-entry-reason">{item.reason}</p>
-              {showTargets && <p className="admin-credits-muted admin-credits-identity">用户 {item.targetUserId}</p>}
-              <p className="admin-credits-muted admin-credits-identity">操作人 {item.adminUserId}</p>
+              {showTargets && <p className="admin-credits-muted admin-credits-identity">{t("用户 {0}", { 0: item.targetUserId })}</p>}
+              <p className="admin-credits-muted admin-credits-identity">{t("操作人 {0}", { 0: item.adminUserId })}</p>
             </li>
           ))}
         </ol>
-      ) : <p className="admin-credits-status admin-credits-muted">暂无调整记录。</p>}
+      ) : <p className="admin-credits-status admin-credits-muted">{t("暂无调整记录。")}</p>}
     </section>
   );
 }

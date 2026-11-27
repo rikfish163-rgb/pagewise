@@ -1,5 +1,8 @@
 'use client';
 
+import { useLocale } from './LocaleProvider';
+import Link from 'next/link';
+import LanguageSwitcher from './LanguageSwitcher';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { formatAdminCredits } from './AdminCreditsAmount';
@@ -10,6 +13,15 @@ import { AdminCreditsUsers } from './AdminCreditsUsers';
 import './AdminCredits.css';
 
 const endpoint = '/api/admin/credits';
+export function AdminCreditsHeading() {
+  const { t } = useLocale();
+  return <header className="admin-credits-heading">
+    <Link href="/#home">{t('‹ 返回页边')}</Link>
+    <h1>{t('积分管理')}</h1>
+    <LanguageSwitcher/>
+  </header>;
+}
+
 const points = z.number().transform(value => Math.round(value * 1000)).pipe(z.int());
 const userSchema = z.object({
   userId: z.string(),
@@ -60,6 +72,7 @@ async function readJson(response: Response): Promise<unknown> {
 }
 
 export function AdminCredits() {
+  const { t } = useLocale();
   const [view, setView] = useState<View>({ query: '', cursors: [''], targetUserId: null });
   const [read, setRead] = useState<ReadResult | null>(null);
   const [review, setReview] = useState<Review | null>(null);
@@ -205,32 +218,32 @@ export function AdminCredits() {
       />
       <aside className="admin-credits-panel" aria-labelledby="admin-credits-account-heading">
         <section className="admin-credits-section">
-          <h2 id="admin-credits-account-heading" ref={detailHeading} tabIndex={-1}>用户积分</h2>
+          <h2 id="admin-credits-account-heading" ref={detailHeading} tabIndex={-1}>{t("用户积分")}</h2>
           {selected && (
             <div className="admin-credits-status admin-credits-identity">
               <strong>{selected.displayName}</strong>
               <p className="admin-credits-muted">{selected.userId}</p>
               <dl className="admin-credits-account">
-                <div><dt>可用积分</dt><dd className="admin-credits-amount">{formatAdminCredits(selected.availableBalance)}</dd></div>
-                <div><dt>积分余额</dt><dd className="admin-credits-amount">{formatAdminCredits(selected.balance)}</dd></div>
+                <div><dt>{t("可用积分")}</dt><dd className="admin-credits-amount">{formatAdminCredits(selected.availableBalance)}</dd></div>
+                <div><dt>{t("积分余额")}</dt><dd className="admin-credits-amount">{formatAdminCredits(selected.balance)}</dd></div>
               </dl>
             </div>
           )}
           {!view.targetUserId && (
-            <p className="admin-credits-status admin-credits-muted">选择用户以查看余额或调整积分。</p>
+            <p className="admin-credits-status admin-credits-muted">{t("选择用户以查看余额或调整积分。")}</p>
           )}
-          {savedRequestId && <p className="admin-credits-status" role="status">已保存积分调整。</p>}
-          {loading && <p className="admin-credits-status admin-credits-muted" role="status">正在读取积分记录…</p>}
+          {savedRequestId && <p className="admin-credits-status" role="status">{t("已保存积分调整。")}</p>}
+          {loading && <p className="admin-credits-status admin-credits-muted" role="status">{t("正在读取积分记录…")}</p>}
           {error && directory && (
             <div className="admin-credits-status admin-credits-actions">
               <p className="admin-credits-error" role="alert">{error}</p>
-              <button type="button" className="admin-credits-button" onClick={() => setView({ ...view })}>重新读取</button>
+              <button type="button" className="admin-credits-button" onClick={() => setView({ ...view })}>{t("重新读取")}</button>
             </div>
           )}
           {selected && (
             <>
               <AdminCreditsForm key={`${selected.userId}:${savedRequestId}`} disabled={!data} onReview={startReview} />
-              {reviewError && <p className="admin-credits-status admin-credits-error" role="alert">{reviewError}</p>}
+              {reviewError && <p className="admin-credits-status admin-credits-error" role="alert">{t(reviewError)}</p>}
             </>
           )}
         </section>
