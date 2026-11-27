@@ -1,7 +1,8 @@
 import {env} from 'cloudflare:workers';
 import {cookies} from 'next/headers';
 import {getChatGPTUser} from './chatgpt-auth';
-import {externalLoginReady as oidcReady,hashSession,sessionCookieName} from '../server/oidc';
+import {oidcConfig,hashSession,sessionCookieName} from '../server/oidc';
+import {emailLoginConfig} from '../server/email-login';
 
 export type SiteAccount = {
   userId: string;
@@ -45,6 +46,10 @@ export async function getSiteAccount():Promise<SiteAccount|null>{
   return legacy;
 }
 
-export function externalLoginReady(){
-  return oidcReady(env);
+export function loginMethodsReady(){
+  return {
+    google: Boolean(env.DB && oidcConfig(env, 'google')),
+    github: Boolean(env.DB && oidcConfig(env, 'github')),
+    email: Boolean(env.DB && env.SITE_AUTH_ORIGIN && emailLoginConfig(env)),
+  };
 }

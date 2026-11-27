@@ -64,6 +64,13 @@
       "when": 1795555200000,
       "tag": "0008_note_append_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1795786012660,
+      "tag": "0009_email_login",
+      "breakpoints": true
     }
   ]
 }

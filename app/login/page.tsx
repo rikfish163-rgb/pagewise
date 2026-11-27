@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { chatGPTSignInPath } from '@/app/chatgpt-auth';
-import { externalLoginReady, getSiteAccount } from '@/app/site-account';
+import { loginMethodsReady, getSiteAccount } from '@/app/site-account';
 import LoginScreen from '@/components/LoginScreen';
 import { localeCookieName, resolveLocale, translate } from '@/lib/i18n';
 
@@ -12,6 +12,10 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 const authMessages = new Map([
+  ["email_sent", "验证码已发送，请查看邮箱。"],
+  ["email_invalid", "请输入有效的邮箱地址。"],
+  ["email_limited", "发送次数已达上限，请稍后再试。"],
+  ["email_failed", "验证码无效或已过期。请重试或重新发送。"],
   ["cancelled", "验证已取消。你可以重新选择登录方式。"],
   ["failed", "验证未成功，请重新尝试。"],
   ["unavailable", "外部登录暂时不可用，请稍后重试。"],
@@ -43,10 +47,10 @@ function getReturnTo(value: string | string[] | undefined) {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ auth?: string | string[]; return_to?: string | string[] }>;
+  searchParams: Promise<{ auth?: string | string[]; email_link?: string | string[]; return_to?: string | string[] }>;
 }) {
   const [account, query] = await Promise.all([getSiteAccount(), searchParams]);
-  const ready = externalLoginReady();
+  const ready = loginMethodsReady();
   const returnTo = getReturnTo(query.return_to);
   const readerPath = returnTo ?? "/";
   const returnQuery = returnTo ? `return_to=${encodeURIComponent(returnTo)}` : "";
@@ -57,6 +61,8 @@ export default async function LoginPage({
   return <LoginScreen
     account={account ? { displayName: account.displayName, email: account.email, source: account.source } : null}
     ready={ready}
+    emailChallenge={status === "email_sent" || status === "email_failed"}
+    emailLink={query.email_link === "1"}
     returnTo={returnTo}
     readerPath={readerPath}
     returnQuery={returnQuery}

@@ -5,31 +5,22 @@ import { test } from "node:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { applyMigrations } from "../../../tests/sqlite-migrations.mjs";
 import {
-  consumeLoginTransaction, createExternalSession, exchangeExternalCode, externalLoginReady,
+  consumeLoginTransaction, createExternalSession, exchangeExternalCode,
   externalSessionOwner, hashSession, linkExternalIdentity, oidcConfig, randomToken,
   revokeExternalSession, safeAuthReturnTo, sameOriginAuthWrite, sessionCookieName,
   startExternalLogin, transactionCookieName,
 } from "../../../server/oidc.ts";
 
 const bindings = {
-  AUTHING_ISSUER: "https://fixture.authing.cn/oidc",
-  AUTHING_CLIENT_ID: "fixture-client",
-  AUTHING_CLIENT_SECRET: "fixture-secret",
-  SITE_AUTH_ORIGIN: "https://pagewise.example",
-  AUTHING_GOOGLE_CONNECTION_ID: "fixture-google",
-  AUTHING_WECHAT_CONNECTION_ID: "fixture-wechat",
+  GOOGLE_CLIENT_ID: "fixture-client.apps.googleusercontent.com",
+  GOOGLE_CLIENT_SECRET: "fixture-secret",
+  SITE_AUTH_ORIGIN: "https://pagewise.htsjustin.com",
 };
 const config = oidcConfig(bindings);
-const issuer = bindings.AUTHING_ISSUER;
-const authorize = issuer + "/auth";
-const tokenUrl = issuer + "/token";
-const jwksUrl = issuer + "/.well-known/jwks.json";
-const discoveryUrl = issuer + "/.well-known/openid-configuration";
-const metadata = {
-  issuer, authorization_endpoint: authorize, token_endpoint: tokenUrl, jwks_uri: jwksUrl,
-  code_challenge_methods_supported: ["S256"], id_token_signing_alg_values_supported: ["RS256"],
-  token_endpoint_auth_methods_supported: ["client_secret_post", "client_secret_basic"],
-};
+const issuer = "https://accounts.google.com";
+const authorize = issuer + "/o/oauth2/v2/auth";
+const tokenUrl = "https://oauth2.googleapis.com/token";
+const jwksUrl = "https://www.googleapis.com/oauth2/v3/certs";
 const request = (cookie) => new Request(config.redirectUri, { headers: cookie ? { Cookie: cookie } : {} });
 const cookiePair = (setCookie) => setCookie.split(";", 1)[0];
 
@@ -61,18 +52,16 @@ function database(t) {
   return { db, sql };
 }
 
-test("requires explicit HTTPS Authing bindings and restricts logout and link origins", () => {
-  assert.equal(externalLoginReady(), false);
+test("requires explicit HTTPS Google bindings and restricts logout and link origins", () => {
+  assert.equal(Boolean(oidcConfig()), false);
   for (const invalid of [
-    { AUTHING_ISSUER: "http://fixture.authing.cn/oidc" },
-    { AUTHING_ISSUER: "https://fixture.authing.cn.evil.example/oidc" },
-    { AUTHING_ISSUER: "https://other@fixture.authing.cn/oidc" },
-    { AUTHING_ISSUER: "https://fixture.authing.cn/oidc?x" },
-    { AUTHING_CLIENT_SECRET: "" },
+    { GOOGLE_CLIENT_ID: "fixture-client" },
+    { GOOGLE_CLIENT_ID: "fixture.apps.googleusercontent.com.example" },
+    { GOOGLE_CLIENT_SECRET: "" },
     { SITE_AUTH_ORIGIN: "https://pagewise.example/path" },
-  ]) assert.equal(externalLoginReady({ ...bindings, ...invalid }), false);
-  assert.equal(externalLoginReady(bindings), true);
-  assert.equal(config.redirectUri, "https://pagewise.example/api/auth/callback");
+  ]) assert.equal(Boolean(oidcConfig({ ...bindings, ...invalid })), false);
+  assert.equal(Boolean(oidcConfig(bindings)), true);
+  assert.equal(config.redirectUri, "https://pagewise.htsjustin.com/api/auth/callback");
   for (const origin of ["null", "https://sub.pagewise.example", undefined]) {
     const headers = origin ? { Origin: origin } : {};
     assert.equal(sameOriginAuthWrite(bindings, new Request(config.redirectUri, { headers })), false);
@@ -88,74 +77,46 @@ test("requires explicit HTTPS Authing bindings and restricts logout and link ori
   assert.equal(safeAuthReturnTo("/?document=abc-123&page=3#reader"), "/?document=abc-123&page=3#reader");
 });
 
-test("starts all hosted methods using S256 and consumes each live transaction only in its browser", async (t) => {
+test("starts Google authorization with S256 and consumes each transaction only in its browser", async (t) => {
   const { db, sql } = database(t);
-  t.mock.method(globalThis, "fetch", async (url, init) => {
-    assert.equal(url, discoveryUrl);
-    assert.equal(init.redirect, "manual");
-    return Response.json(metadata);
+  t.mock.method(globalThis, "fetch", () => assert.fail("Authorization uses the fixed Google endpoint"));
+  const { location, cookie } = await startExternalLogin(db, config, request(), {
+    intent: "login", returnTo: "/?document=abc&page=3#reader",
   });
+  const url = new URL(location);
+  assert.equal(url.origin + url.pathname, authorize);
+  assert.equal(url.searchParams.get("prompt"), "select_account");
+  assert.equal(url.searchParams.get("redirect_uri"), config.redirectUri);
+  assert.equal(url.searchParams.get("scope"), "openid profile email");
+  assert.equal(url.searchParams.get("response_type"), "code");
+  assert.equal(url.searchParams.get("code_challenge_method"), "S256");
+  assert.equal(url.searchParams.get("client_secret"), null);
+  assert.match(cookie, /^__Host-pagewise_oidc=[\w-]{43}; Path=\/; Max-Age=300; HttpOnly; Secure; SameSite=Lax$/);
 
-  for (const method of ["google", "wechat", "email", "phone"]) {
-    const { location, cookie } = await startExternalLogin(db, config, request(), {
-      intent: "login", method, returnTo: "/?document=abc&page=3#reader",
-    });
-    const url = new URL(location);
-    assert.equal(url.origin + url.pathname, authorize);
-    assert.equal(url.searchParams.get("ext_idp_conn_id"),
-      ["google", "wechat"].includes(method) ? "fixture-" + method : null);
-    assert.equal(url.searchParams.get("response_type"), "code");
-    assert.equal(url.searchParams.get("code_challenge_method"), "S256");
-    assert.equal(url.searchParams.get("client_secret"), null);
-    assert.match(cookie, /^__Host-pagewise_oidc=[\w-]{43}; Path=\/; Max-Age=300; HttpOnly; Secure; SameSite=Lax$/);
-
-    const state = url.searchParams.get("state");
-    const callback = request(cookiePair(cookie));
-    const row = sql.prepare("SELECT state_hash, browser_hash FROM site_login_transactions").get();
-    assert.equal(row.state_hash, await hashSession(state));
-    assert.equal(row.browser_hash, await hashSession(cookiePair(cookie).slice(transactionCookieName.length + 1)));
-    assert.equal(await consumeLoginTransaction(db, callback, randomToken()), null);
-    assert.equal(await consumeLoginTransaction(db, request(transactionCookieName + "=" + randomToken()), state), null);
-    const attempts = await Promise.all([
-      consumeLoginTransaction(db, callback, state),
-      consumeLoginTransaction(db, callback, state),
-    ]);
-    const transaction = attempts.find(Boolean);
-    assert.equal(attempts.filter(Boolean).length, 1);
-    assert.equal(transaction.return_to, "/?document=abc&page=3#reader");
-    assert.equal(transaction.nonce, url.searchParams.get("nonce"));
-    assert.equal(url.searchParams.get("code_challenge"),
-      createHash("sha256").update(transaction.code_verifier).digest("base64url"));
-  }
+  const state = url.searchParams.get("state");
+  const callback = request(cookiePair(cookie));
+  const row = sql.prepare("SELECT state_hash, browser_hash FROM site_login_transactions").get();
+  assert.equal(row.state_hash, await hashSession(state));
+  assert.equal(row.browser_hash, await hashSession(cookiePair(cookie).slice(transactionCookieName.length + 1)));
+  assert.equal(await consumeLoginTransaction(db, callback, randomToken()), null);
+  assert.equal(await consumeLoginTransaction(db, request(transactionCookieName + "=" + randomToken()), state), null);
+  const attempts = await Promise.all([
+    consumeLoginTransaction(db, callback, state),
+    consumeLoginTransaction(db, callback, state),
+  ]);
+  const transaction = attempts.find(Boolean);
+  assert.equal(attempts.filter(Boolean).length, 1);
+  assert.equal(transaction.return_to, "/?document=abc&page=3#reader");
+  assert.equal(transaction.nonce, url.searchParams.get("nonce"));
+  assert.equal(url.searchParams.get("code_challenge"),
+    createHash("sha256").update(transaction.code_verifier).digest("base64url"));
 
   const pending = await startExternalLogin(db, config, request(), {
-    intent: "login", method: "phone", returnTo: "/",
+    intent: "login", returnTo: "/",
   });
   sql.exec("UPDATE site_login_transactions SET expires_at = 0");
   assert.equal(await consumeLoginTransaction(db, request(cookiePair(pending.cookie)),
     new URL(pending.location).searchParams.get("state")), null);
-});
-
-test("rejects a mismatched discovery issuer or off-origin endpoint before credentials are sent", async (t) => {
-  const { db } = database(t);
-  let response;
-  t.mock.method(globalThis, "fetch", async (url, init) => {
-    assert.equal(url, discoveryUrl);
-    assert.equal(init.redirect, "manual");
-    return response;
-  });
-  for (const mismatch of [
-    { issuer: "https://elsewhere.example/oidc" },
-    { authorization_endpoint: "https://elsewhere.example/oidc/auth" },
-    { token_endpoint: "http://fixture.authing.cn/oidc/token" },
-    { jwks_uri: "https://sibling.authing.cn/oidc/.well-known/jwks.json" },
-    { code_challenge_methods_supported: ["plain"] },
-  ]) {
-    response = Response.json({ ...metadata, ...mismatch });
-    await assert.rejects(startExternalLogin(db, config, request(), { intent: "login", returnTo: "/" }));
-  }
-  response = Response.redirect("https://elsewhere.example/oidc", 302);
-  await assert.rejects(startExternalLogin(db, config, request(), { intent: "login", returnTo: "/" }));
 });
 
 test("accepts only a matching, signed RS256 token and rejects token and JWKS redirects", async (t) => {
@@ -171,12 +132,12 @@ test("accepts only a matching, signed RS256 token and rejects token and JWKS red
   let tokens, jwks;
   t.mock.method(globalThis, "fetch", async (url, init) => {
     assert.equal(init.redirect, "manual");
-    if (String(url) === discoveryUrl) return Response.json(metadata);
     if (String(url) === jwksUrl) return jwks();
     assert.equal(String(url), tokenUrl);
     assert.equal(init.method, "POST");
     const form = new URLSearchParams(init.body);
-    assert.equal(form.get("client_secret"), bindings.AUTHING_CLIENT_SECRET);
+    assert.equal(form.get("client_secret"), bindings.GOOGLE_CLIENT_SECRET);
+    assert.equal(form.get("client_id"), bindings.GOOGLE_CLIENT_ID);
     assert.equal(form.get("redirect_uri"), config.redirectUri);
     assert.equal(form.get("code_verifier"), transaction.code_verifier);
     return tokens();
@@ -205,9 +166,8 @@ test("accepts only a matching, signed RS256 token and rejects token and JWKS red
   await assert.rejects(exchange(await sign({}, crypto.getRandomValues(new Uint8Array(32)), "HS256")));
 
   const link = { ...transaction, intent: "link", legacy_owner: "legacy" };
-  await assert.rejects(exchange(await sign(), link));
-  await assert.rejects(exchange(await sign({ auth_time: now - 60 }), link));
-  assert.equal((await exchange(await sign({ auth_time: now }), link)).subject, "subject");
+  assert.equal((await exchange(await sign(), link)).subject, "subject");
+  assert.equal((await exchange(await sign({ iss: "accounts.google.com" }))).issuer, issuer);
 
   tokens = () => Response.redirect("https://elsewhere.example/token", 307);
   await assert.rejects(exchangeExternalCode(config, "fixture-code", transaction));
@@ -223,7 +183,7 @@ test("session rotation and revocation preserve provider ownership and never link
   assert.match(original, /^__Host-pagewise_session=[\w-]{43}; Path=\/; Max-Age=28800; HttpOnly; Secure; SameSite=Lax$/);
   const originalRequest = request(cookiePair(original));
   const owner = await externalSessionOwner(db, originalRequest);
-  assert.match(owner, /^authing:/);
+  assert.match(owner, /^account:/);
   assert.equal(sql.prepare("SELECT email FROM site_accounts WHERE owner = ?").get(owner).email, external.email);
   assert.equal(await linkExternalIdentity(db, request(), external, "legacy"), false);
 
@@ -241,4 +201,86 @@ test("session rotation and revocation preserve provider ownership and never link
   assert.equal(snapshot.token_hash, await hashSession(cookiePair(rotated).slice(sessionCookieName.length + 1)));
   await revokeExternalSession({ DB: db }, rotatedRequest);
   assert.equal(await externalSessionOwner(db, rotatedRequest), undefined);
+});
+
+test("GitHub uses its own callback, PKCE, and a stable user ID without forwarding tokens elsewhere", async (t) => {
+  const { db } = database(t);
+  const github = oidcConfig({
+    ...bindings, GITHUB_CLIENT_ID: "github_client", GITHUB_CLIENT_SECRET: "github-secret",
+  }, "github");
+  const { location, cookie } = await startExternalLogin(db, github, request(), { intent: "login", returnTo: "/" });
+  const url = new URL(location);
+  assert.equal(url.origin + url.pathname, "https://github.com/login/oauth/authorize");
+  assert.equal(url.searchParams.get("redirect_uri"), "https://pagewise.htsjustin.com/api/auth/callback/github");
+  assert.equal(url.searchParams.get("code_challenge_method"), "S256");
+  assert.equal(url.searchParams.get("nonce"), null);
+  const transaction = await consumeLoginTransaction(db, request(cookiePair(cookie)), url.searchParams.get("state"));
+  assert(transaction);
+
+  let fetches = 0;
+  t.mock.method(globalThis, "fetch", async (endpoint, init) => {
+    fetches++;
+    assert.equal(init.redirect, "manual");
+    if (endpoint === "https://github.com/login/oauth/access_token") {
+      const form = new URLSearchParams(init.body);
+      assert.equal(form.get("code_verifier"), transaction.code_verifier);
+      assert.equal(form.get("redirect_uri"), github.redirectUri);
+      return Response.json({ access_token: "gho_fixture" });
+    }
+    assert.equal(endpoint, "https://api.github.com/user");
+    assert.equal(init.headers.Authorization, "Bearer gho_fixture");
+    return Response.json({ id: 4382, login: "reader", email: "unverified@example.com" });
+  });
+  await assert.rejects(exchangeExternalCode(config, "code", transaction), /provider mismatch/);
+  assert.equal(fetches, 0);
+  assert.deepEqual(await exchangeExternalCode(github, "code", transaction), {
+    issuer: "https://github.com", subject: "4382", displayName: "reader", email: null,
+  });
+  assert.equal(fetches, 2);
+});
+
+test("email codes are kept out of D1, bound to the browser and owner, and consumed once", async (t) => {
+  const { db, sql } = database(t);
+  const env = { RESEND_API_KEY: "re_fixture", AUTH_EMAIL_FROM: "login@mail.example.com" };
+  const { emailLoginConfig, normalizeLoginEmail, sendLoginEmail, verifyLoginEmail } =
+    await import("../../../server/email-login.ts");
+  const emailConfig = emailLoginConfig(env);
+  const email = normalizeLoginEmail(" Reader+Notes@Example.COM ");
+  assert.equal(email, "reader+notes@example.com");
+  let code;
+  t.mock.method(globalThis, "fetch", async (endpoint, init) => {
+    assert.equal(endpoint, "https://api.resend.com/emails");
+    assert.equal(init.redirect, "error");
+    const body = JSON.parse(init.body);
+    assert.deepEqual(body.to, [email]);
+    code = body.text.match(/\b\d{6}\b/)[0];
+    return new Response(null, { status: 200 });
+  });
+
+  const cookie = await sendLoginEmail(db, emailConfig, email, "/?document=abc", "legacy");
+  assert.match(cookie, /^__Host-pagewise_email=[\w-]{43}; Path=\/; Max-Age=600; HttpOnly; Secure; SameSite=Lax$/);
+  const row = sql.prepare("SELECT code_hash, attempts FROM site_email_challenges").get();
+  assert.match(row.code_hash, /^[0-9a-f]{64}$/);
+  assert.equal(row.attempts, 0);
+  assert.equal(await sendLoginEmail(db, emailConfig, email, "/", null), null);
+  const browser = request(cookiePair(cookie));
+  assert.equal(await verifyLoginEmail(db, emailConfig, request(), code, "legacy"), null);
+  assert.equal(await verifyLoginEmail(db, emailConfig, browser, code, null), null);
+  const wrong = code === "000000" ? "000001" : "000000";
+  assert.equal(await verifyLoginEmail(db, emailConfig, browser, wrong, "legacy"), null);
+  assert.equal(sql.prepare("SELECT attempts FROM site_email_challenges").get().attempts, 1);
+  const [first, second] = await Promise.all([
+    verifyLoginEmail(db, emailConfig, browser, code, "legacy"),
+    verifyLoginEmail(db, emailConfig, browser, code, "legacy"),
+  ]);
+  assert.equal([first, second].filter(Boolean).length, 1);
+  assert.equal((first ?? second).return_to, "/?document=abc");
+
+  sql.prepare("UPDATE site_email_challenges SET consumed = 0, attempts = 0, sent_at = ?")
+    .run(Date.now() - 11 * 60_000);
+  assert.equal(await verifyLoginEmail(db, emailConfig, browser, code, "legacy"), null);
+  sql.prepare("UPDATE site_email_challenges SET attempts = 4, sent_at = ?").run(Date.now());
+  assert.equal(await verifyLoginEmail(db, emailConfig, browser, wrong, "legacy"), null);
+  assert.equal(await verifyLoginEmail(db, emailConfig, browser, code, "legacy"), null);
+  assert.equal(sql.prepare("SELECT attempts FROM site_email_challenges").get().attempts, 5);
 });

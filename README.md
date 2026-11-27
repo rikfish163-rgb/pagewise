@@ -76,7 +76,9 @@ PAGEWISE_KEY_FILE=/absolute/path/to/private-key-file npm run dev:key -- --port 5
 
 - `PAGEWISE_LEGACY_EMAILS` 保存仍可通过 ChatGPT 登录的邮件地址，逗号分隔。通过此通道进入的用户继续访问原有资料。
 - `PAGEWISE_ADMIN_EMAILS` 保存可操作「个人账户 → 积分管理」的原有 ChatGPT 账户。管理员调分会留下金额、原因、操作人和时间，并计入用户收支明细。
-- 外部账号使用托管 Authing OIDC。启用时，在身份服务里打开 Google、邮箱验证码、PC 微信扫码和短信验证码。在 Sites 环境设置 `AUTHING_ISSUER`（例如 `https://你的应用域名.authing.cn/oidc`）、`AUTHING_CLIENT_ID`、`AUTHING_CLIENT_SECRET` 和 `SITE_AUTH_ORIGIN`（页边的公开域名）。注册 `https://pagewise.shrewdcape8.chatgpt.site/api/auth/callback` 为回调地址，选择授权码、PKCE S256 和 RS256。验证码由身份服务发送和核验。PC 微信扫码需要获准的微信网站应用，邮件和短信通道也需分别启用。
+- Google 和 GitHub 直连各自的 OAuth 服务。Google Web 应用客户端回调为 `https://pagewise.htsjustin.com/api/auth/callback`，GitHub OAuth App 回调为 `https://pagewise.htsjustin.com/api/auth/callback/github`。在 Sites 服务端设置 `SITE_AUTH_ORIGIN=https://pagewise.htsjustin.com`、`GOOGLE_CLIENT_ID`、`GITHUB_CLIENT_ID`，把 `GOOGLE_CLIENT_SECRET` 和 `GITHUB_CLIENT_SECRET` 存为 Secret。
+- 邮箱验证码由 Resend 发信。先验证一个发信域名，例如 `auth-mail.htsjustin.com`，再把发件地址设为 `AUTH_EMAIL_FROM`，并把发送权限的 `RESEND_API_KEY` 存为 Secret。发布时应用 `drizzle/0009_email_login.sql`。验证码在同一浏览器内有效 10 分钟，最多尝试 5 次，成功后不能重用。
+- 原有用户先用受邀的 ChatGPT 账号登录，再从账号页面绑定 Google、GitHub 或邮箱。外部身份用提供方和稳定的身份 ID 查找原资料库。邮箱地址相同不会自动合并账号。
 
 
 ### GitHub 与正式站
